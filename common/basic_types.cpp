@@ -1,6 +1,6 @@
 #include "basic_types.h"
 
-namespace rtc9 {
+namespace rtc10 {
 
 const float xbar_CIE1931_2deg[] = {
     0.0001299, 0.000145847, 0.000163802, 0.000184004, 0.00020669, 0.0002321, 0.000260728, 0.000293075,

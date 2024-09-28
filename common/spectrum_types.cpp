@@ -2,15 +2,15 @@
 
 #include "spectrum_types.h"
 
-namespace rtc9 {
+namespace rtc10 {
 
-#if defined(__CUDA_ARCH__) && RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#if defined(__CUDA_ARCH__) && RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
 #   define maxBrightnesses plp.s->UpsampledSpectrum_maxBrightnesses
 #   define coefficients_sRGB_D65 plp.s->UpsampledSpectrum_coefficients_sRGB_D65
 #   define coefficients_sRGB_E plp.s->UpsampledSpectrum_coefficients_sRGB_E
 #endif
 
-#if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
 template <typename RealType, uint32_t NumSpectralSamples>
 CUDA_DEVICE_FUNCTION void UpsampledSpectrumTemplate<RealType, NumSpectralSamples>::
     computeAdjacents(RealType u, RealType v) {
@@ -19,8 +19,8 @@ CUDA_DEVICE_FUNCTION void UpsampledSpectrumTemplate<RealType, NumSpectralSamples
     const auto spectrum_data_points = plp.s->UpsampledSpectrum_spectrum_data_points;
 #   endif
 
-    u = rtc9::clamp<RealType>(u, 0.0f, static_cast<RealType>(GridWidth()));
-    v = rtc9::clamp<RealType>(v, 0.0f, static_cast<RealType>(GridHeight()));
+    u = rtc10::clamp<RealType>(u, 0.0f, static_cast<RealType>(GridWidth()));
+    v = rtc10::clamp<RealType>(v, 0.0f, static_cast<RealType>(GridHeight()));
 
     int32_t ui = static_cast<int32_t>(u);
     int32_t vi = static_cast<int32_t>(v);
@@ -92,7 +92,7 @@ CUDA_DEVICE_FUNCTION void UpsampledSpectrumTemplate<RealType, NumSpectralSamples
     }
     Assert((m_adjIndices & 0xFF) != UINT8_MAX, "Adjacent points must be selected at this point.");
 }
-#elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
 template <typename RealType, uint32_t NumSpectralSamples>
 CUDA_DEVICE_FUNCTION void UpsampledSpectrumTemplate<RealType, NumSpectralSamples>::
     interpolateCoefficients(RealType e0, RealType e1, RealType e2, const PolynomialCoefficients* table) {
@@ -120,9 +120,9 @@ CUDA_DEVICE_FUNCTION void UpsampledSpectrumTemplate<RealType, NumSpectralSamples
     RealType fBaseYIdx = (kTableResolution - 1) * coords[1];
     RealType fBaseXIdx = (kTableResolution - 1) * coords[2];
 
-    uint32_t baseBIdx = ::rtc9::min<uint32_t>(kTableResolution - 2, idx);
-    uint32_t baseYIdx = ::rtc9::min<uint32_t>(kTableResolution - 2, fBaseYIdx);
-    uint32_t baseXIdx = ::rtc9::min<uint32_t>(kTableResolution - 2, fBaseXIdx);
+    uint32_t baseBIdx = ::rtc10::min<uint32_t>(kTableResolution - 2, idx);
+    uint32_t baseYIdx = ::rtc10::min<uint32_t>(kTableResolution - 2, fBaseYIdx);
+    uint32_t baseXIdx = ::rtc10::min<uint32_t>(kTableResolution - 2, fBaseXIdx);
 
     RealType brightnessL = maxBrightnesses[baseBIdx];
     RealType brightnessU = maxBrightnesses[baseBIdx + 1];
@@ -162,7 +162,7 @@ CUDA_DEVICE_FUNCTION void UpsampledSpectrumTemplate<RealType, NumSpectralSamples
 }
 #endif
 
-#if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
 template <typename RealType, uint32_t NumSpectralSamples>
 CUDA_DEVICE_FUNCTION constexpr UpsampledSpectrumTemplate<RealType, NumSpectralSamples>::
     UpsampledSpectrumTemplate(SpectrumType spType, ColorSpace space, RealType e0, RealType e1, RealType e2) {
@@ -225,11 +225,11 @@ CUDA_DEVICE_FUNCTION constexpr UpsampledSpectrumTemplate<RealType, NumSpectralSa
     m_scale = brightness / EqualEnergyReflectance();
     RealType uv[2];
     xy_to_uv(xy, uv);
-    Assert(rtc9::isfinite(uv[0]) && rtc9::isfinite(uv[1]) && rtc9::isfinite(m_scale), "Invalid value.");
+    Assert(rtc10::isfinite(uv[0]) && rtc10::isfinite(uv[1]) && rtc10::isfinite(m_scale), "Invalid value.");
 
     computeAdjacents(uv[0], uv[1]);
 }
-#elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
 template <typename RealType, uint32_t NumSpectralSamples>
 CUDA_DEVICE_FUNCTION UpsampledSpectrumTemplate<RealType, NumSpectralSamples>::
     UpsampledSpectrumTemplate(SpectrumType spType, ColorSpace space, RealType e0, RealType e1, RealType e2) {
@@ -277,7 +277,7 @@ template <typename RealType, uint32_t NumSpectralSamples>
 CUDA_DEVICE_FUNCTION SampledSpectrumTemplate<RealType, NumSpectralSamples>
     UpsampledSpectrumTemplate<RealType, NumSpectralSamples>::
     evaluate(const WavelengthSamplesTemplate<RealType, NumSpectralSamples> &wls) const {
-#if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
 #   if defined(__CUDA_ARCH__)
     const auto spectrum_data_points = plp.s->UpsampledSpectrum_spectrum_data_points;
 #   endif
@@ -313,8 +313,8 @@ CUDA_DEVICE_FUNCTION SampledSpectrumTemplate<RealType, NumSpectralSamples>
         RealType p = (lambda - MinWavelength()) / (MaxWavelength() - MinWavelength());
         p = clamp<RealType>(p, 0.0, 1.0);
         RealType sBinF = p * (NumWavelengthSamples() - 1);
-        uint32_t sBin = rtc9::min<uint32_t>(static_cast<uint32_t>(sBinF), NumWavelengthSamples() - 1);
-        uint32_t sBinNext = rtc9::min<uint32_t>(sBin + 1, NumWavelengthSamples() - 1);
+        uint32_t sBin = rtc10::min<uint32_t>(static_cast<uint32_t>(sBinF), NumWavelengthSamples() - 1);
+        uint32_t sBinNext = rtc10::min<uint32_t>(sBin + 1, NumWavelengthSamples() - 1);
         RealType t = sBinF - sBin;
         for (int j = 0; j < numAdjacents; ++j) {
             const float* spectrum = spectrum_data_points[adjIndices[j]].spectrum;
@@ -323,7 +323,7 @@ CUDA_DEVICE_FUNCTION SampledSpectrumTemplate<RealType, NumSpectralSamples>
     }
 
     return ret * m_scale;
-#elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
     SampledSpectrumTemplate<RealType, NumSpectralSamples> ret(0.0);
 
     for (int i = 0; i < NumSpectralSamples; ++i) {
@@ -338,15 +338,15 @@ CUDA_DEVICE_FUNCTION SampledSpectrumTemplate<RealType, NumSpectralSamples>
 #endif
 }
 
-#if defined(__CUDA_ARCH__) && RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#if defined(__CUDA_ARCH__) && RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
 #   undef coefficients_sRGB_E
 #   undef coefficients_sRGB_D65
 #   undef maxBrightnesses
 #endif
 
 #if !defined(__CUDA_ARCH__)
-#   if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
-#   elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#   if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#   elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
 template <typename RealType, uint32_t NumSpectralSamples>
 float UpsampledSpectrumTemplate<RealType, NumSpectralSamples>::maxBrightnesses[kTableResolution];
 template <typename RealType, uint32_t NumSpectralSamples>
@@ -359,8 +359,8 @@ typename UpsampledSpectrumTemplate<RealType, NumSpectralSamples>::PolynomialCoef
 
 template <typename RealType, uint32_t NumSpectralSamples>
 void UpsampledSpectrumTemplate<RealType, NumSpectralSamples>::initialize() {
-#   if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
-#   elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#   if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#   elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
     const auto readUpsamplingTable = [](const char* filename, PolynomialCoefficients* coefficients) {
         const std::filesystem::path tableDir = getExecutableDirectory() / "spectral_upsampling_table/";
         std::ifstream ifs;
@@ -421,7 +421,7 @@ void RegularSampledSpectrumTemplate<RealType, NumSpectralSamples>::toXYZ(RealTyp
     const RealType binWidth = (m_maxLambda - m_minLambda) / (m_numSamples - 1);
     uint32_t curCMFIdx = 0;
     uint32_t baseIdx = 0;
-    RealType curWL = rtc9::min<RealType>(WavelengthLowBound, m_minLambda);
+    RealType curWL = rtc10::min<RealType>(WavelengthLowBound, m_minLambda);
     RealType prev_xbarVal = 0, prev_ybarVal = 0, prev_zbarVal = 0;
     RealType prevValue = 0;
     RealType halfWidth = 0;
@@ -440,7 +440,7 @@ void RegularSampledSpectrumTemplate<RealType, NumSpectralSamples>::toXYZ(RealTyp
             ++curCMFIdx;
         }
         else {
-            uint32_t idx = rtc9::min(
+            uint32_t idx = rtc10::min(
                 static_cast<uint32_t>((curWL - WavelengthLowBound) / CMFBinWidth),
                 NumCMFSamples - 1);
             RealType CMFBaseWL = WavelengthLowBound + idx * CMFBinWidth;
@@ -689,7 +689,7 @@ template class DiscretizedSpectrumTemplate<float, NumStrataForStorage>;
 
 
 #if !defined(__CUDA_ARCH__)
-#   if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#   if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
 template <>
 const UpsampledSpectrumTemplate<float, NumSpectralSamples>::spectrum_grid_cell_t
     UpsampledSpectrumTemplate<float, NumSpectralSamples>::spectrum_grid[] = {
@@ -1422,4 +1422,4 @@ const UpsampledSpectrumTemplate<double, NumSpectralSamples>::spectrum_data_point
 #   endif
 #endif
 
-} // namespace rtc9
+} // namespace rtc10

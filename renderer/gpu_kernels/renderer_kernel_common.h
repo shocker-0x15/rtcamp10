@@ -2,9 +2,9 @@
 
 #include "../renderer_shared.h"
 
-using namespace rtc9;
-using namespace rtc9::shared;
-using namespace rtc9::device;
+using namespace rtc10;
+using namespace rtc10::shared;
+using namespace rtc10::device;
 
 
 
@@ -372,7 +372,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum performNextEventEstimation(
 
         Vector3D vInLocal = interPt.toLocal(-shadowRayDir);
         float bsdfPDensity = bsdf.evaluatePDF(bsdfQuery, vInLocal) * lpCos / dist2;
-        if (!rtc9::isfinite(bsdfPDensity))
+        if (!rtc10::isfinite(bsdfPDensity))
             bsdfPDensity = 0.0f;
         float lightPDensity = areaPDensity;
         float misWeight = pow2(lightPDensity) / (pow2(bsdfPDensity) + pow2(lightPDensity));

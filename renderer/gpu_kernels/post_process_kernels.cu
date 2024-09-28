@@ -1,9 +1,9 @@
 #define PURE_CUDA
 #include "../renderer_shared.h"
 
-using namespace rtc9;
-using namespace rtc9::shared;
-using namespace rtc9::device;
+using namespace rtc10;
+using namespace rtc10::shared;
+using namespace rtc10::device;
 
 
 

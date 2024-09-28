@@ -1,7 +1,7 @@
 ﻿#define PURE_CUDA
 #include "../renderer_shared.h"
 
-using namespace rtc9;
+using namespace rtc10;
 
 CUDA_DEVICE_KERNEL void dummyKernel(
 	RGBSpectrum rgb,

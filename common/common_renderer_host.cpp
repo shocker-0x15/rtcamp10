@@ -1,6 +1,6 @@
 #include "common_renderer_host.h"
 
-namespace rtc9 {
+namespace rtc10 {
 
 template <typename RealType>
 void DiscreteDistribution1DTemplate<RealType, false>::

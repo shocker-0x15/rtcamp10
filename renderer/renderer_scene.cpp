@@ -6,7 +6,7 @@
 #include "../common/dds_loader.h"
 #include "../ext/stb/stb_image.h"
 
-namespace rtc9 {
+namespace rtc10 {
 
 GPUEnvironment g_gpuEnv;
 Scene g_scene;

@@ -10,7 +10,7 @@
 #include <mutex>
 #include <condition_variable>
 
-namespace rtc9 {
+namespace rtc10 {
 
 void devPrintf(const char* fmt, ...) {
     va_list args;
@@ -28,7 +28,7 @@ std::filesystem::path getExecutableDirectory() {
 
     static bool done = false;
     if (!done) {
-#if defined(RTC9_Platform_Windows_MSVC)
+#if defined(RTC10_Platform_Windows_MSVC)
         TCHAR filepath[1024];
         auto length = GetModuleFileName(NULL, filepath, 1024);
         Assert(length > 0, "Failed to query the executable path.");

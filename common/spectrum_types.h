@@ -2,7 +2,7 @@
 
 #include "spectrum_base.h"
 
-namespace rtc9 {
+namespace rtc10 {
 
 template <typename RealType, uint32_t NumSpectralSamples>
 struct WavelengthSamplesTemplate {
@@ -60,7 +60,7 @@ struct WavelengthSamplesTemplate {
         WavelengthSamplesTemplate wls;
         for (int i = 0; i < NumSpectralSamples; ++i)
             wls.lambdas[i] = WavelengthLowBound + (WavelengthHighBound - WavelengthLowBound) * (i + offset) / NumSpectralSamples;
-        wls._selectedLambdaIndex = ::rtc9::min<uint16_t>(NumSpectralSamples * uLambda, NumSpectralSamples - 1);
+        wls._selectedLambdaIndex = ::rtc10::min<uint16_t>(NumSpectralSamples * uLambda, NumSpectralSamples - 1);
         wls._singleIsSelected = false;
         *PDF = NumSpectralSamples / (WavelengthHighBound - WavelengthLowBound);
         return wls;
@@ -227,13 +227,13 @@ struct SampledSpectrumTemplate {
     }
     CUDA_DEVICE_FUNCTION bool hasNaN() const {
         for (int i = 0; i < NumSpectralSamples; ++i)
-            if (::rtc9::isnan(values[i]))
+            if (::rtc10::isnan(values[i]))
                 return true;
         return false;
     }
     CUDA_DEVICE_FUNCTION bool hasInf() const {
         for (int i = 0; i < NumSpectralSamples; ++i)
-            if (::rtc9::isinf(values[i]))
+            if (::rtc10::isinf(values[i]))
                 return true;
         return false;
     }
@@ -331,13 +331,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr SampledSpectrumTemplate<RealType, Num
 
 template <typename RealType, uint32_t NumSpectralSamples>
 class UpsampledSpectrumTemplate {
-#if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
     uint32_t m_adjIndices;
     uint16_t m_s, m_t;
     RealType m_scale;
 
     CUDA_DEVICE_FUNCTION void computeAdjacents(RealType u, RealType v);
-#elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
 public:
     struct PolynomialCoefficients {
         float c0, c1, c2;
@@ -358,14 +358,14 @@ private:
 #endif
 
 public:
-#if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
     CUDA_DEVICE_FUNCTION UpsampledSpectrumTemplate(RealType u, RealType v, RealType scale) {
         computeAdjacents(u, v);
         m_scale = scale;
     }
     CUDA_DEVICE_FUNCTION constexpr UpsampledSpectrumTemplate(
         SpectrumType spType, ColorSpace space, RealType e0, RealType e1, RealType e2);
-#elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
     CUDA_DEVICE_FUNCTION UpsampledSpectrumTemplate(SpectrumType spType, ColorSpace space, RealType e0, RealType e1, RealType e2);
 #endif
     CUDA_DEVICE_FUNCTION UpsampledSpectrumTemplate() {}
@@ -373,7 +373,7 @@ public:
     CUDA_DEVICE_FUNCTION SampledSpectrumTemplate<RealType, NumSpectralSamples> evaluate(
         const WavelengthSamplesTemplate<RealType, NumSpectralSamples> &wls) const;
 
-#if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
     CUDA_DEVICE_FUNCTION CUDA_INLINE static constexpr RealType MinWavelength() { return static_cast<RealType>(360.0); }
     CUDA_DEVICE_FUNCTION CUDA_INLINE static constexpr RealType MaxWavelength() { return static_cast<RealType>(830.0); }
     CUDA_DEVICE_FUNCTION CUDA_INLINE static constexpr uint32_t NumWavelengthSamples() { return 95; }
@@ -430,7 +430,7 @@ public:
             + static_cast<RealType>(0.05077639329371236) * uv[1]
             - static_cast<RealType>(0.006895157122499944);
     }
-#elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
     static constexpr uint32_t kTableResolution = 64;
 #   if !defined(__CUDA_ARCH__)
     static float maxBrightnesses[kTableResolution];
@@ -442,13 +442,13 @@ public:
 #endif
 
     CUDA_DEVICE_FUNCTION void print() const {
-#if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
         devPrintf(
             "%08x, %.6f, %.6f, %g\n", m_adjIndices,
             static_cast<float>(m_s) / (UINT16_MAX - 1),
             static_cast<float>(m_t) / (UINT16_MAX - 1),
             m_scale);
-#elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
         devPrintf("%g, %g, %g\n", m_c[0], m_c[1], m_c[2]);
 #endif
     }
@@ -517,7 +517,7 @@ public:
         for (int i = 0; i < NumStrataForStorage; ++i)
             values[i] = 0.0f;
         for (int i = 0; i < N; ++i) {
-            uint32_t sBin = ::rtc9::min<uint32_t>((wls[i] - WavelengthLowBound) / (WavelengthHighBound - WavelengthLowBound) * NumStrataForStorage, NumStrataForStorage - 1);
+            uint32_t sBin = ::rtc10::min<uint32_t>((wls[i] - WavelengthLowBound) / (WavelengthHighBound - WavelengthLowBound) * NumStrataForStorage, NumStrataForStorage - 1);
             values[sBin] += val[i] * recBinWidth;
         }
     }
@@ -619,13 +619,13 @@ public:
     }
     CUDA_DEVICE_FUNCTION bool hasNaN() const {
         for (int i = 0; i < NumStrataForStorage; ++i)
-            if (rtc9::isnan(values[i]))
+            if (rtc10::isnan(values[i]))
                 return true;
         return false;
     }
     CUDA_DEVICE_FUNCTION bool hasInf() const {
         for (int i = 0; i < NumStrataForStorage; ++i)
-            if (rtc9::isinf(values[i]))
+            if (rtc10::isinf(values[i]))
                 return true;
         return false;
     }
@@ -643,19 +643,19 @@ public:
         const WavelengthSamplesTemplate<RealType, N> &wls, const SampledSpectrumTemplate<RealType, N> &val) {
         const RealType recBinWidth = NumStrataForStorage / (WavelengthHighBound - WavelengthLowBound);
         for (int i = 0; i < N; ++i) {
-            uint32_t sBin = ::rtc9::min<uint32_t>((wls[i] - WavelengthLowBound) / (WavelengthHighBound - WavelengthLowBound) * NumStrataForStorage, NumStrataForStorage - 1);
+            uint32_t sBin = ::rtc10::min<uint32_t>((wls[i] - WavelengthLowBound) / (WavelengthHighBound - WavelengthLowBound) * NumStrataForStorage, NumStrataForStorage - 1);
             values[sBin] += val[i] * recBinWidth;
         }
         return *this;
     }
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
     template <uint32_t N>
     CUDA_DEVICE_FUNCTION void atomicAdd(
         const WavelengthSamplesTemplate<RealType, N> &wls, const SampledSpectrumTemplate<RealType, N> &val) {
         const RealType recBinWidth = NumStrataForStorage / (WavelengthHighBound - WavelengthLowBound);
         for (int i = 0; i < N; ++i) {
-            uint32_t sBin = ::rtc9::min<uint32_t>((wls[i] - WavelengthLowBound) / (WavelengthHighBound - WavelengthLowBound) * NumStrataForStorage, NumStrataForStorage - 1);
+            uint32_t sBin = ::rtc10::min<uint32_t>((wls[i] - WavelengthLowBound) / (WavelengthHighBound - WavelengthLowBound) * NumStrataForStorage, NumStrataForStorage - 1);
             ::atomicAdd(&values[sBin], val[i] * recBinWidth);
         }
     }
@@ -725,7 +725,7 @@ public:
         const RealType recBinWidth = NumStrataForStorage / (WavelengthHighBound - WavelengthLowBound);
         ValueType addend(0.0);
         for (int i = 0; i < N; ++i) {
-            uint32_t sBin = ::rtc9::min<uint32_t>((wls[i] - WavelengthLowBound) / (WavelengthHighBound - WavelengthLowBound) * NumStrataForStorage, NumStrataForStorage - 1);
+            uint32_t sBin = ::rtc10::min<uint32_t>((wls[i] - WavelengthLowBound) / (WavelengthHighBound - WavelengthLowBound) * NumStrataForStorage, NumStrataForStorage - 1);
             addend[sBin] += val[i] * recBinWidth;
         }
         value += addend;
@@ -751,4 +751,4 @@ using UpsampledSpectrum = UpsampledSpectrumTemplate<float, NumSpectralSamples>;
 using RegularSampledSpectrum = RegularSampledSpectrumTemplate<float, NumSpectralSamples>;
 using IrregularSampledSpectrum = IrregularSampledSpectrumTemplate<float, NumSpectralSamples>;
 
-} // namespace rtc9
+} // namespace rtc10

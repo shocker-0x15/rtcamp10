@@ -2,15 +2,15 @@
 
 // Platform defines
 #if defined(_WIN32) || defined(_WIN64)
-#    define RTC9_Platform_Windows
+#    define RTC10_Platform_Windows
 #    if defined(_MSC_VER)
-#        define RTC9_Platform_Windows_MSVC
+#        define RTC10_Platform_Windows_MSVC
 #       if defined(__INTELLISENSE__)
-#           define RTC9_Platform_CodeCompletion
+#           define RTC10_Platform_CodeCompletion
 #       endif
 #    endif
 #elif defined(__APPLE__)
-#    define RTC9_Platform_macOS
+#    define RTC10_Platform_macOS
 #endif
 
 #ifdef _DEBUG
@@ -22,7 +22,7 @@
 
 
 
-#if defined(RTC9_Platform_Windows_MSVC)
+#if defined(RTC10_Platform_Windows_MSVC)
 #   define NOMINMAX
 #   define _USE_MATH_DEFINES
 #   include <Windows.h>
@@ -59,9 +59,9 @@
 
 
 
-namespace rtc9 {
+namespace rtc10 {
 
-#ifdef RTC9_Platform_Windows_MSVC
+#ifdef RTC10_Platform_Windows_MSVC
 #   if defined(__CUDA_ARCH__)
 #       define devPrintf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 #   else

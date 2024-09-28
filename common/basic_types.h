@@ -469,30 +469,30 @@ CUDA_COMMON_FUNCTION CUDA_INLINE bool allFinite(const float4 &v) {
 }
 
 CUDA_COMMON_FUNCTION CUDA_INLINE int2 min(const int2 &v0, const int2 &v1) {
-    return make_int2(rtc9::min(v0.x, v1.x),
-                     rtc9::min(v0.y, v1.y));
+    return make_int2(rtc10::min(v0.x, v1.x),
+                     rtc10::min(v0.y, v1.y));
 }
 CUDA_COMMON_FUNCTION CUDA_INLINE int2 max(const int2 &v0, const int2 &v1) {
-    return make_int2(rtc9::max(v0.x, v1.x),
-                     rtc9::max(v0.y, v1.y));
+    return make_int2(rtc10::max(v0.x, v1.x),
+                     rtc10::max(v0.y, v1.y));
 }
 
 CUDA_COMMON_FUNCTION CUDA_INLINE uint2 min(const uint2 &v0, const uint2 &v1) {
-    return make_uint2(rtc9::min(v0.x, v1.x),
-                      rtc9::min(v0.y, v1.y));
+    return make_uint2(rtc10::min(v0.x, v1.x),
+                      rtc10::min(v0.y, v1.y));
 }
 CUDA_COMMON_FUNCTION CUDA_INLINE uint2 max(const uint2 &v0, const uint2 &v1) {
-    return make_uint2(rtc9::max(v0.x, v1.x),
-                      rtc9::max(v0.y, v1.y));
+    return make_uint2(rtc10::max(v0.x, v1.x),
+                      rtc10::max(v0.y, v1.y));
 }
 
 CUDA_COMMON_FUNCTION CUDA_INLINE float2 min(const float2 &v0, const float2 &v1) {
-    return make_float2(rtc9::min(v0.x, v1.x),
-                       rtc9::min(v0.y, v1.y));
+    return make_float2(rtc10::min(v0.x, v1.x),
+                       rtc10::min(v0.y, v1.y));
 }
 CUDA_COMMON_FUNCTION CUDA_INLINE float2 max(const float2 &v0, const float2 &v1) {
-    return make_float2(rtc9::max(v0.x, v1.x),
-                       rtc9::max(v0.y, v1.y));
+    return make_float2(rtc10::max(v0.x, v1.x),
+                       rtc10::max(v0.y, v1.y));
 }
 
 CUDA_COMMON_FUNCTION CUDA_INLINE float3 min(const float3 &v0, const float3 &v1) {
@@ -575,7 +575,7 @@ CUDA_COMMON_FUNCTION CUDA_INLINE float orderedIntToFloat(int32_t iVal) {
 
 
 
-namespace rtc9 {
+namespace rtc10 {
 
 #if __cplusplus >= 202002L
 template <std::floating_point T>
@@ -733,15 +733,15 @@ struct Point3DTemplate {
     }
 
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasNan() const {
-        using rtc9::isnan;
+        using rtc10::isnan;
         return isnan(x) || isnan(y) || isnan(z);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasInf() const {
-        using rtc9::isinf;
+        using rtc10::isinf;
         return isinf(x) || isinf(y) || isinf(z);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool allFinite() const {
-        using rtc9::isfinite;
+        using rtc10::isfinite;
         return isfinite(x) && isfinite(y) && isfinite(z);
     }
 
@@ -827,15 +827,15 @@ struct Vector3DTemplate {
     }
 
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasNan() const {
-        using rtc9::isnan;
+        using rtc10::isnan;
         return isnan(x) || isnan(y) || isnan(z);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasInf() const {
-        using rtc9::isinf;
+        using rtc10::isinf;
         return isinf(x) || isinf(y) || isinf(z);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool allFinite() const {
-        using rtc9::isfinite;
+        using rtc10::isfinite;
         return isfinite(x) && isfinite(y) && isfinite(z);
     }
 
@@ -891,16 +891,16 @@ struct Vector3DTemplate {
         RealType phi, RealType theta) {
         RealType sinPhi, cosPhi;
         RealType sinTheta, cosTheta;
-        rtc9::sincos(phi, &sinPhi, &cosPhi);
-        rtc9::sincos(theta, &sinTheta, &cosTheta);
+        rtc10::sincos(phi, &sinPhi, &cosPhi);
+        rtc10::sincos(theta, &sinTheta, &cosTheta);
         return Vector3DTemplate(cosPhi * sinTheta, sinPhi * sinTheta, cosTheta);
     }
     CUDA_COMMON_FUNCTION CUDA_INLINE static /*constexpr*/ Vector3DTemplate fromPolarYUp(
         RealType phi, RealType theta) {
         RealType sinPhi, cosPhi;
         RealType sinTheta, cosTheta;
-        rtc9::sincos(phi, &sinPhi, &cosPhi);
-        rtc9::sincos(theta, &sinTheta, &cosTheta);
+        rtc10::sincos(phi, &sinPhi, &cosPhi);
+        rtc10::sincos(theta, &sinTheta, &cosTheta);
         return Vector3DTemplate(-sinPhi * sinTheta, cosTheta, cosPhi * sinTheta);
     }
 };
@@ -965,15 +965,15 @@ struct Vector4DTemplate {
     }
 
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasNan() const {
-        using rtc9::isnan;
+        using rtc10::isnan;
         return isnan(x) || isnan(y) || isnan(z) || isnan(w);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasInf() const {
-        using rtc9::isinf;
+        using rtc10::isinf;
         return isinf(x) || isinf(y) || isinf(z) || isinf(w);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool allFinite() const {
-        using rtc9::isfinite;
+        using rtc10::isfinite;
         return isfinite(x) && isfinite(y) && isfinite(z) && isfinite(w);
     }
 
@@ -1038,15 +1038,15 @@ struct TexCoord2DTemplate {
     }
 
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasNan() const {
-        using rtc9::isnan;
+        using rtc10::isnan;
         return isnan(u) || isnan(v);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasInf() const {
-        using rtc9::isinf;
+        using rtc10::isinf;
         return isinf(u) || isinf(v);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool allFinite() const {
-        using rtc9::isfinite;
+        using rtc10::isfinite;
         return isfinite(u) && isfinite(v);
     }
 
@@ -1592,15 +1592,15 @@ struct QuaternionTemplate {
     }
 
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasNan() const {
-        using rtc9::isnan;
+        using rtc10::isnan;
         return v.hasNan() || isnan(w);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasInf() const {
-        using rtc9::isinf;
+        using rtc10::isinf;
         return v.hasInf() || isinf(w);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool allFinite() const {
-        using rtc9::isfinite;
+        using rtc10::isfinite;
         return v.allFinite() && isfinite(w);
     }
 
@@ -2075,14 +2075,14 @@ CUDA_COMMON_FUNCTION CUDA_INLINE constexpr TexCoord2DTemplate<RealType> operator
 template <typename RealType>
 CUDA_COMMON_FUNCTION CUDA_INLINE constexpr TexCoord2DTemplate<RealType> min(
     const TexCoord2DTemplate<RealType> &tca, const TexCoord2DTemplate<RealType> &tcb) {
-    using rtc9::min;
+    using rtc10::min;
     return TexCoord2DTemplate<RealType>(min(tca.u, tcb.u), min(tca.v, tcb.v), min(tca.z, tcb.z));
 }
 
 template <typename RealType>
 CUDA_COMMON_FUNCTION CUDA_INLINE constexpr TexCoord2DTemplate<RealType> max(
     const TexCoord2DTemplate<RealType> &tca, const TexCoord2DTemplate<RealType> &tcb) {
-    using rtc9::max;
+    using rtc10::max;
     return TexCoord2DTemplate<RealType>(max(tca.u, tcb.u), max(tca.v, tcb.v), max(tca.z, tcb.z));
 }
 
@@ -2897,4 +2897,4 @@ using Matrix4x4 = Matrix4x4Template<float>;
 using Quaternion = QuaternionTemplate<float>;
 using BoundingBox3D = BoundingBox3DTemplate<float>;
 
-} // namespace rtc9
+} // namespace rtc10

@@ -14,10 +14,10 @@ static constexpr bool useGenericBSDF = false;
 //#define HARD_CODED_BSDF SimplePBR_BRDF
 #define HARD_CODED_BSDF LambertBRDF
 
-#define RTC9_USE_SPECTRAL_RENDERING 1
+#define RTC10_USE_SPECTRAL_RENDERING 1
 
-namespace rtc9 {
-#if RTC9_USE_SPECTRAL_RENDERING
+namespace rtc10 {
+#if RTC10_USE_SPECTRAL_RENDERING
     using WavelengthSamples = WavelengthSamplesTemplate<float, NumSpectralSamples>;
     using SampledSpectrum = SampledSpectrumTemplate<float, NumSpectralSamples>;
     using DiscretizedSpectrum = DiscretizedSpectrumTemplate<float, NumStrataForStorage>;
@@ -39,7 +39,7 @@ namespace rtc9 {
 
     CUDA_DEVICE_FUNCTION CUDA_INLINE TripletSpectrum createTripletSpectrum(
         SpectrumType spectrumType, ColorSpace colorSpace, float e0, float e1, float e2) {
-#if RTC9_USE_SPECTRAL_RENDERING
+#if RTC10_USE_SPECTRAL_RENDERING
         return UpsampledSpectrum(spectrumType, colorSpace, e0, e1, e2);
 #else
         if constexpr (renderingRGB == ColorSpace::Rec709_D65) {
@@ -161,7 +161,7 @@ constexpr const char* callableProgramPointerNames[] = {
 
 // JP: Callable Programのインデックスから対応する関数ポインターへのマップ。
 // EN: Map from callable programs to corresponding function pointers.
-#if (defined(__CUDA_ARCH__) && defined(PURE_CUDA)) || defined(RTC9_Platform_CodeCompletion)
+#if (defined(__CUDA_ARCH__) && defined(PURE_CUDA)) || defined(RTC10_Platform_CodeCompletion)
 CUDA_CONSTANT_MEM void* c_callableToPointerMap[NumCallablePrograms];
 #endif
 
@@ -174,7 +174,7 @@ CUDA_CONSTANT_MEM void* c_callableToPointerMap[NumCallablePrograms];
 
 
 
-namespace rtc9::device {
+namespace rtc10::device {
 
 CUDA_DEVICE_FUNCTION int2 getMousePosition();
 CUDA_DEVICE_FUNCTION bool getDebugPrintEnabled();
@@ -183,7 +183,7 @@ CUDA_DEVICE_FUNCTION bool getDebugPrintEnabled();
 
 
 
-namespace rtc9::shared {
+namespace rtc10::shared {
 
 CUDA_COMMON_FUNCTION CUDA_INLINE constexpr uint32_t mapPrimarySampleToDiscrete(
     float u01, uint32_t numValues, float* uRemapped = nullptr) {
@@ -324,7 +324,7 @@ public:
         return m_CDF;
     }
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
     CUDA_DEVICE_FUNCTION void setWeightAt(uint32_t index, RealType value) {
         m_weights[index] = value;
     }
@@ -387,7 +387,7 @@ public:
         m_numValues = numValues;
     }
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
     CUDA_DEVICE_FUNCTION uint32_t setWeightAt(uint32_t index, RealType value) {
         m_weights[index] = value;
     }
@@ -589,7 +589,7 @@ public:
         return index2D.y * dim.x + index2D.x;
     }
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
     CUDA_DEVICE_FUNCTION uint2 sample(
         float u0, float u1, float* remappedU0, float* remappedU1, float* prob) const {
         Assert(u0 >= 0 && u1 < 1, "\"u0\": %g must be in range [0, 1).", u0);
@@ -748,7 +748,7 @@ public:
         return static_cast<uint32_t>(m_callableHandle);
     }
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
     CUDA_DEVICE_FUNCTION ReturnType operator()(const ArgTypes &... args) const {
 #   if defined(PURE_CUDA)
         void* ptr = c_callableToPointerMap[static_cast<uint32_t>(m_callableHandle)];
@@ -1065,7 +1065,7 @@ struct ImageBasedEnvironmentalLight {
     uint32_t imageWidth : 16;
     uint32_t imageHeight : 16;
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
     CUDA_DEVICE_FUNCTION SampledSpectrum sample(
         const WavelengthSamples &wls,
         float uDir0, float uDir1, float* phi, float* theta, float* dirPDensity) const;
@@ -1085,7 +1085,7 @@ struct EnvironmentalLight {
     float powerCoeff;
     float rotation;
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
     CUDA_DEVICE_FUNCTION SampledSpectrum sample(
         const WavelengthSamples &wls,
         float uDir0, float uDir1, Vector3D* dir, float* dirPDensity) const {
@@ -1354,13 +1354,13 @@ struct RGBSpectrumAsOrderedInt {
     }
 };
 
-} // namespace rtc9::shared
+} // namespace rtc10::shared
 
 
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
 
-namespace rtc9::device {
+namespace rtc10::device {
 
 static constexpr float RayEpsilon = 1e-4;
 
@@ -2523,11 +2523,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void atomicAdd_RGBSpectrum(
     atomicAdd(&dstValue->b, value.b);
 }
 
-} // namespace rtc9::device
+} // namespace rtc10::device
 
 
 
-namespace rtc9::shared {
+namespace rtc10::shared {
 
 CUDA_DEVICE_FUNCTION SampledSpectrum ImageBasedEnvironmentalLight::sample(
     const WavelengthSamples &wls,
@@ -2593,4 +2593,4 @@ CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(ImageBasedEnvironmentalLight_evaluate);
 
 } // namespace rtc8::shared
 
-#endif // #if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#endif // #if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)

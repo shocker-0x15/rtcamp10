@@ -5,7 +5,7 @@
 #define RGBFMT "%g, %g, %g"
 #define rgbprint(sp) sp.r, sp.g, sp.b
 
-namespace rtc9 {
+namespace rtc10 {
 
 template <typename RealType>
 struct RGBWavelengthSamplesTemplate {
@@ -38,7 +38,7 @@ struct RGBWavelengthSamplesTemplate {
         Assert(offset >= 0 && offset < 1, "\"offset\" must be in range [0, 1).");
         Assert(uLambda >= 0 && uLambda < 1, "\"uLambda\" must be in range [0, 1).");
         RGBWavelengthSamplesTemplate wls;
-        wls._selectedLambdaIndex = rtc9::min<uint16_t>(3 * uLambda, 3 - 1);
+        wls._selectedLambdaIndex = rtc10::min<uint16_t>(3 * uLambda, 3 - 1);
         wls._singleIsSelected = false;
         *PDF = 1;
         return wls;
@@ -115,15 +115,15 @@ struct RGBSpectrumTemplate {
     }
 
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasNan() const {
-        using rtc9::isnan;
+        using rtc10::isnan;
         return isnan(r) || isnan(g) || isnan(b);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool hasInf() const {
-        using rtc9::isinf;
+        using rtc10::isinf;
         return isinf(r) || isinf(g) || isinf(b);
     }
     CUDA_COMMON_FUNCTION /*constexpr*/ bool allFinite() const {
-        using rtc9::isfinite;
+        using rtc10::isfinite;
         return isfinite(r) && isfinite(g) && isfinite(b);
     }
     CUDA_COMMON_FUNCTION constexpr bool hasNonZero() const {
@@ -201,7 +201,7 @@ struct RGBSpectrumTemplate {
         return *this;
     }
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
     CUDA_DEVICE_FUNCTION void atomicAdd(const RGBWavelengthSamplesTemplate<RealType> &wls, const RGBSpectrumTemplate<RealType> &val) {
         ::atomicAdd(&r, val.r);
         ::atomicAdd(&g, val.g);
@@ -430,4 +430,4 @@ public:
 
 using RGBSpectrum = RGBSpectrumTemplate<float>;
 
-} // namespace rtc9
+} // namespace rtc10

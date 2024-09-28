@@ -4,7 +4,7 @@
 #include "../common/common_renderer_host.h"
 #include "../ext/cubd/cubd.h"
 
-namespace rtc9 {
+namespace rtc10 {
 
 constexpr cudau::BufferType bufferType = cudau::BufferType::Device;
 
@@ -1343,4 +1343,4 @@ struct RenderConfigs {
 
 void loadScene(const std::filesystem::path &filePath, RenderConfigs* renderConfigs);
 
-} // namespace rtc9
+} // namespace rtc10

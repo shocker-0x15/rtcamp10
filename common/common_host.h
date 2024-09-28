@@ -18,12 +18,12 @@
 #include <filesystem>
 
 #if 1
-#   define hpprintf(fmt, ...) do { rtc9::devPrintf(fmt, ##__VA_ARGS__); printf(fmt, ##__VA_ARGS__); } while (0)
+#   define hpprintf(fmt, ...) do { rtc10::devPrintf(fmt, ##__VA_ARGS__); printf(fmt, ##__VA_ARGS__); } while (0)
 #else
 #   define hpprintf(fmt, ...) printf(fmt, ##__VA_ARGS__)
 #endif
 
-namespace rtc9 {
+namespace rtc10 {
 
 std::filesystem::path getExecutableDirectory();
 
@@ -211,4 +211,4 @@ void enqueueSaveImage(
 
 void finishImageSaverThread();
 
-} // namespace rtc9
+} // namespace rtc10

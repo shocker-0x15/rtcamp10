@@ -61,7 +61,7 @@ namespace ImGui {
 
 
 
-namespace rtc9 {
+namespace rtc10 {
 
 static StopWatchHiRes g_globalTimer;
 
@@ -170,7 +170,7 @@ static void setUpPipelineLaunchParameters(uint32_t screenWidth, uint32_t screenH
         staticPlpOnHost.DiscretizedSpectrum_ybar = DiscretizedSpectrumAlwaysSpectral::ybar;
         staticPlpOnHost.DiscretizedSpectrum_zbar = DiscretizedSpectrumAlwaysSpectral::zbar;
         staticPlpOnHost.DiscretizedSpectrum_integralCMF = DiscretizedSpectrumAlwaysSpectral::integralCMF;
-#if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
         constexpr uint32_t NumSpectrumGridCells = 168;
         constexpr uint32_t NumSpectrumDataPoints = 186;
         UpsampledSpectrum_spectrum_grid.initialize(
@@ -183,7 +183,7 @@ static void setUpPipelineLaunchParameters(uint32_t screenWidth, uint32_t screenH
             UpsampledSpectrum_spectrum_grid.getDevicePointer();
         staticPlpOnHost.UpsampledSpectrum_spectrum_data_points =
             UpsampledSpectrum_spectrum_data_points.getDevicePointer();
-#elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
         UpsampledSpectrum_maxBrightnesses.initialize(
             m_cuContext, g_bufferType,
             UpsampledSpectrum::maxBrightnesses, UpsampledSpectrum::kTableResolution);
@@ -1346,13 +1346,13 @@ int32_t mainFunc(int32_t argc, const char* argv[]) {
     return ret;
 }
 
-} // namespace rtc9
+} // namespace rtc10
 
 
 
 int32_t main(int32_t argc, const char* argv[]) {
 	try {
-		return rtc9::mainFunc(argc, argv);
+		return rtc10::mainFunc(argc, argv);
 	}
 	catch (const std::exception &ex) {
 		hpprintf("Error: %s\n", ex.what());

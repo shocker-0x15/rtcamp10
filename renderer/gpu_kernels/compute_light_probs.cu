@@ -2,9 +2,9 @@
 #include "../../common/common_renderer_types.h"
 #include "../renderer_shared.h" // only for debug for now
 
-using namespace rtc9;
-using namespace rtc9::shared;
-using namespace rtc9::device;
+using namespace rtc10;
+using namespace rtc10::shared;
+using namespace rtc10::device;
 
 
 
@@ -44,7 +44,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeTriangleImportance(
     emittanceEstimate /= 3;
 
     float importance = emittanceEstimate.luminance() * area;
-    Assert(rtc9::isfinite(importance), "imp: %g, area: %g", importance, area);
+    Assert(rtc10::isfinite(importance), "imp: %g, area: %g", importance, area);
     //printf("area: %g, %p, %g\n", area, mat.emittance, importance);
     return importance;
 }

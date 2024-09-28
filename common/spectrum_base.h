@@ -2,19 +2,19 @@
 
 #include "basic_types.h"
 
-namespace rtc9 {
+namespace rtc10 {
 
-#define RTC9_Color_System_CIE_1931_2deg  0
-#define RTC9_Color_System_CIE_1964_10deg 1
-#define RTC9_Color_System_CIE_2012_2deg  2
-#define RTC9_Color_System_CIE_2012_10deg 3
+#define RTC10_Color_System_CIE_1931_2deg  0
+#define RTC10_Color_System_CIE_1964_10deg 1
+#define RTC10_Color_System_CIE_2012_2deg  2
+#define RTC10_Color_System_CIE_2012_10deg 3
 
 #define MENG_SPECTRAL_UPSAMPLING 0
 // TODO: 光源など1.0を超えるスペクトラムへの対応。
 #define JAKOB_SPECTRAL_UPSAMPLING 1
 
-#define RTC9_Color_System_is_based_on RTC9_Color_System_CIE_1931_2deg
-#define RTC9_SPECTRAL_UPSAMPLING_METHOD MENG_SPECTRAL_UPSAMPLING
+#define RTC10_Color_System_is_based_on RTC10_Color_System_CIE_1931_2deg
+#define RTC10_SPECTRAL_UPSAMPLING_METHOD MENG_SPECTRAL_UPSAMPLING
 
 static constexpr uint32_t NumSpectralSamples = 4;
 static constexpr uint32_t NumStrataForStorage = 16;
@@ -23,19 +23,19 @@ static constexpr float WavelengthLowBound = 360.0f;
 static constexpr float WavelengthHighBound = 830.0f;
 static constexpr uint32_t NumCMFSamples = 471;
 
-#if RTC9_Color_System_is_based_on == RTC9_Color_System_CIE_1931_2deg
+#if RTC10_Color_System_is_based_on == RTC10_Color_System_CIE_1931_2deg
 #   define xbarReferenceValues xbar_CIE1931_2deg
 #   define ybarReferenceValues ybar_CIE1931_2deg
 #   define zbarReferenceValues zbar_CIE1931_2deg
-#elif RTC9_Color_System_is_based_on == RTC9_Color_System_CIE_1964_10deg
+#elif RTC10_Color_System_is_based_on == RTC10_Color_System_CIE_1964_10deg
 #   define xbarReferenceValues xbar_CIE1964_10deg
 #   define ybarReferenceValues ybar_CIE1964_10deg
 #   define zbarReferenceValues zbar_CIE1964_10deg
-#elif RTC9_Color_System_is_based_on == RTC9_Color_System_CIE_2012_2deg
+#elif RTC10_Color_System_is_based_on == RTC10_Color_System_CIE_2012_2deg
 #   define xbarReferenceValues xbar_CIE2012_2deg
 #   define ybarReferenceValues ybar_CIE2012_2deg
 #   define zbarReferenceValues zbar_CIE2012_2deg
-#elif RTC9_Color_System_is_based_on == RTC9_Color_System_CIE_2012_10deg
+#elif RTC10_Color_System_is_based_on == RTC10_Color_System_CIE_2012_10deg
 #   define xbarReferenceValues xbar_CIE2012_10deg
 #   define ybarReferenceValues ybar_CIE2012_10deg
 #   define zbarReferenceValues zbar_CIE2012_10deg
@@ -251,4 +251,4 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr RealType calcLuminance(
     return 0.0f;
 }
 
-} // namespace rtc9
+} // namespace rtc10

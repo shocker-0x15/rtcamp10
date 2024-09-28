@@ -2,7 +2,7 @@
 
 #include "../common/common_renderer_types.h"
 
-namespace rtc9::shared {
+namespace rtc10::shared {
 
 static constexpr float probToSampleEnvLight = 0.25f;
 
@@ -54,10 +54,10 @@ struct StaticPipelineLaunchParameters {
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_ybar;
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_zbar;
     float DiscretizedSpectrum_integralCMF;
-#if RTC9_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
+#if RTC10_SPECTRAL_UPSAMPLING_METHOD == MENG_SPECTRAL_UPSAMPLING
     const UpsampledSpectrum::spectrum_grid_cell_t* UpsampledSpectrum_spectrum_grid;
     const UpsampledSpectrum::spectrum_data_point_t* UpsampledSpectrum_spectrum_data_points;
-#elif RTC9_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
+#elif RTC10_SPECTRAL_UPSAMPLING_METHOD == JAKOB_SPECTRAL_UPSAMPLING
     const float* UpsampledSpectrum_maxBrightnesses;
     const UpsampledSpectrum::PolynomialCoefficients* UpsampledSpectrum_coefficients_sRGB_D65;
     const UpsampledSpectrum::PolynomialCoefficients* UpsampledSpectrum_coefficients_sRGB_E;
@@ -110,19 +110,19 @@ using ClosestRaySignature = optixu::PayloadSignature<
     uint32_t, uint32_t, uint32_t, float, float, float>;
 using VisibilityRaySignature = optixu::PayloadSignature<float>;
 
-} // namespace rtc9::shared
+} // namespace rtc10::shared
 
 
 
-#if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
 
 #if defined(PURE_CUDA)
-CUDA_CONSTANT_MEM rtc9::shared::PipelineLaunchParameters plp;
+CUDA_CONSTANT_MEM rtc10::shared::PipelineLaunchParameters plp;
 #else
-RT_PIPELINE_LAUNCH_PARAMETERS rtc9::shared::PipelineLaunchParameters plp;
+RT_PIPELINE_LAUNCH_PARAMETERS rtc10::shared::PipelineLaunchParameters plp;
 #endif
 
-namespace rtc9::device {
+namespace rtc10::device {
 
 CUDA_DEVICE_FUNCTION CUDA_INLINE int2 getMousePosition() {
     return plp.f->mousePosition;
@@ -136,9 +136,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE const shared::BSDFProcedureSet &getBSDFProcedur
     return plp.s->bsdfProcedureSets[slot];
 }
 
-} // namespace rtc9::device
+} // namespace rtc10::device
 
-#endif // #if defined(__CUDA_ARCH__) || defined(RTC9_Platform_CodeCompletion)
+#endif // #if defined(__CUDA_ARCH__) || defined(RTC10_Platform_CodeCompletion)
 
 
 

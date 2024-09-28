@@ -3,7 +3,7 @@
 #include "common_host.h"
 #include "common_renderer_types.h"
 
-namespace rtc9 {
+namespace rtc10 {
 
 template <typename RealType, bool useAliasTable>
 class DiscreteDistribution1DTemplate;
