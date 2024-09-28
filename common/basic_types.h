@@ -577,16 +577,12 @@ CUDA_COMMON_FUNCTION CUDA_INLINE float orderedIntToFloat(int32_t iVal) {
 
 namespace rtc9 {
 
-#if __cplusplus < 202002L
-
-template <typename RealType>
-static constexpr RealType pi_v = static_cast<RealType>(3.14159265358979323846);
-
+#if __cplusplus >= 202002L
+template <std::floating_point T>
+static constexpr T pi_v = std::numbers::pi_v<T>;
 #else
-
-template <typename RealType>
-using pi_v = std::numbers::pi_v<RealType>;
-
+template <typename T>
+static constexpr T pi_v = static_cast<T>(3.141592653589793);
 #endif
 
 template <typename RealType>

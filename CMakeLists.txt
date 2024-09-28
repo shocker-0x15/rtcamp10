@@ -19,10 +19,10 @@ find_package(OptiX80)
 include("copy_files")
 include("nvcuda_compile_ptx")
 
-if (OptiX77_FOUND)
-    set(OPTIX_INCLUDE_DIR "${OPTIX77_INCLUDE_DIR}")
+if (OptiX80_FOUND)
+    set(OPTIX_INCLUDE_DIR "${OPTIX80_INCLUDE_DIR}")
 else()
-    message(FATAL_ERROR "OptiX SDK 7.7 not found.")
+    message(FATAL_ERROR "OptiX SDK 8.0 not found.")
 endif()
 
 
@@ -143,7 +143,7 @@ function(set_common_sources)
         "$<$<CONFIG:Debug>:-G>"
         "$<$<CONFIG:Debug>:-D_DEBUG=1>"
         "--gpu-architecture=compute_52"
-        "-std=c++17"
+        "-std=c++20"
         "-cudart" "shared"
         "--use_fast_math"
         "--relocatable-device-code=true"
@@ -312,6 +312,10 @@ target_compile_options(
     # if (compilerID == MSVC && compilerLanguage != CUDA) set(/MP);
     "$<$<AND:$<C_COMPILER_ID:MSVC>,$<NOT:$<COMPILE_LANGUAGE:CUDA>>>:/MP>"
     "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<NOT:$<COMPILE_LANGUAGE:CUDA>>>:/MP>"
+    # if (compilerID == MSVC && compilerLanguage != CUDA) set(/Zc:__cplusplus);
+    "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<NOT:$<COMPILE_LANGUAGE:CUDA>>>:/Zc:__cplusplus>"
+    # if (compilerID == MSVC && compilerLanguage == CUDA) set(-Xcompiler "/wd 4819 /Zc:__cplusplus");
+    "$<$<AND:$<CXX_COMPILER_ID:MSVC>,$<COMPILE_LANGUAGE:CUDA>>:-Xcompiler=/wd4819 /Zc:__cplusplus>"
 )
 target_include_directories(
     fakelib INTERFACE

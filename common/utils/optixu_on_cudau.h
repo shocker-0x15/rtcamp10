@@ -26,7 +26,7 @@ namespace optixu {
             int32_t, int2, int4,
             uint32_t, uint2, uint4>; // other types?
         static constexpr size_t typeSize = sizeof(T);
-        static_assert(typeSize == 4 || typeSize == 8 || typeSize == 16,
+        static_assert(typeSize == 4 || typeSize == 8 || typeSize == 12 || typeSize == 16,
                       "Unsupported size of type.");
 #endif // if defined(__CUDA_ARCH__) || defined(OPTIXU_Platform_CodeCompletion)
         CUsurfObject m_surfObject;

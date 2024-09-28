@@ -39,11 +39,14 @@
 #   include <cstdint>
 #   include <cmath>
 
-#   include <numbers>
 #   include <limits>
 #   include <algorithm>
 
 #   include <immintrin.h>
+#endif
+
+#if __cplusplus >= 202002L
+#   include <numbers>
 #endif
 
 #include "../common/utils/cuda_util.h"

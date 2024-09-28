@@ -866,7 +866,7 @@ static bool loadTexture(
             for (int32_t mipLevel = 0; mipLevel < std::max(mipCount - 2, 1); ++mipLevel)
                 cacheValue.texture->write<uint8_t>(
                     imageData[mipLevel], static_cast<uint32_t>(sizes[mipLevel]), mipLevel);
-            dds::free(imageData, mipCount, sizes);
+            dds::free(imageData, sizes);
         }
         else {
             success = false;
@@ -947,7 +947,7 @@ static bool loadNormalTexture(
             for (int32_t mipLevel = 0; mipLevel < std::max(mipCount - 2, 1); ++mipLevel)
                 cacheValue.texture->write<uint8_t>(
                     imageData[mipLevel], static_cast<uint32_t>(sizes[mipLevel]), mipLevel);
-            dds::free(imageData, mipCount, sizes);
+            dds::free(imageData, sizes);
         }
         else {
             success = false;
