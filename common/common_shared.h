@@ -106,12 +106,32 @@ CUDA_COMMON_FUNCTION CUDA_INLINE uint32_t tzcnt(uint32_t x) {
 #endif
 }
 
+CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr uint32_t tzcntConst(uint32_t x) {
+    uint32_t count = 0;
+    for (int bit = 0; bit < 32; ++bit) {
+        if ((x >> bit) & 0b1)
+            break;
+        ++count;
+}
+    return count;
+}
+
 CUDA_COMMON_FUNCTION CUDA_INLINE uint32_t lzcnt(uint32_t x) {
 #if defined(__CUDA_ARCH__)
     return __clz(x);
 #else
     return _lzcnt_u32(x);
 #endif
+}
+
+CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr uint32_t lzcntConst(uint32_t x) {
+    uint32_t count = 0;
+    for (int bit = 31; bit >= 0; --bit) {
+        if ((x >> bit) & 0b1)
+            break;
+        ++count;
+}
+    return count;
 }
 
 CUDA_COMMON_FUNCTION CUDA_INLINE int32_t popcnt(uint32_t x) {
@@ -135,6 +155,12 @@ CUDA_COMMON_FUNCTION CUDA_INLINE uint32_t prevPowOf2Exponent(uint32_t x) {
     return 31 - lzcnt(x);
 }
 
+CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr uint32_t prevPowOf2ExponentConst(uint32_t x) {
+    if (x == 0)
+        return 0;
+    return 31 - lzcntConst(x);
+}
+
 //    0: 0
 //    1: 0
 //    2: 1
@@ -146,6 +172,12 @@ CUDA_COMMON_FUNCTION CUDA_INLINE uint32_t nextPowOf2Exponent(uint32_t x) {
     if (x == 0)
         return 0;
     return 32 - lzcnt(x - 1);
+}
+
+CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr uint32_t nextPowOf2ExponentConst(uint32_t x) {
+    if (x == 0)
+        return 0;
+    return 32 - lzcntConst(x - 1);
 }
 
 //     0: 0
@@ -161,6 +193,12 @@ CUDA_COMMON_FUNCTION CUDA_INLINE uint32_t prevPowerOf2(uint32_t x) {
     return 1 << prevPowOf2Exponent(x);
 }
 
+CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr uint32_t prevPowerOf2Const(uint32_t x) {
+    if (x == 0)
+        return 0;
+    return 1 << prevPowOf2ExponentConst(x);
+}
+
 //    0: 0
 //    1: 1
 //    2: 2
@@ -172,6 +210,12 @@ CUDA_COMMON_FUNCTION CUDA_INLINE uint32_t nextPowerOf2(uint32_t x) {
     if (x == 0)
         return 0;
     return 1 << nextPowOf2Exponent(x);
+}
+
+CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr uint32_t nextPowerOf2Const(uint32_t x) {
+    if (x == 0)
+        return 0;
+    return 1 << nextPowOf2ExponentConst(x);
 }
 
 template <typename IntType>

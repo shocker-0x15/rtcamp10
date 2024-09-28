@@ -111,11 +111,13 @@ namespace optixu {
             return T();
         }
         RT_DEVICE_FUNCTION void write(uint2 idx, const T &value, cudaSurfaceBoundaryMode boundaryMode = cudaBoundaryModeTrap) const {
-            write(idx.x * sizeof(T), idx.y, value, boundaryMode);
+            constexpr uint32_t stride = sizeof(T) == 12 ? 16 : sizeof(T);
+            write(idx.x * stride, idx.y, value, boundaryMode);
         }
         template <size_t offsetInBytes, typename U>
         RT_DEVICE_FUNCTION void writePartially(uint2 idx, U value, cudaSurfaceBoundaryMode boundaryMode = cudaBoundaryModeTrap) const {
-            write(idx.x * sizeof(T) + offsetInBytes, idx.y, value, boundaryMode);
+            constexpr uint32_t stride = sizeof(T) == 12 ? 16 : sizeof(T);
+            write(idx.x * stride + offsetInBytes, idx.y, value, boundaryMode);
         }
 
         RT_DEVICE_FUNCTION T read(int2 idx, cudaSurfaceBoundaryMode boundaryMode = cudaBoundaryModeTrap) const {

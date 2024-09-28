@@ -1048,6 +1048,7 @@ static int32_t runGuiApp() {
 
         g_gpuEnv.applyToneMap.launchWithThreadDim(
             curCuStream, cudau::dim3(renderTargetSizeX, renderTargetSizeY));
+        //CUDADRV_CHECK(cuStreamSynchronize(curCuStream));
 
         outputBufferHolder.endCUDAAccess(curCuStream, true);
         curGpuTimer.frame.stop(curCuStream);
