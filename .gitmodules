@@ -1,0 +1,24 @@
+[submodule "ext/cubd"]
+	path = ext/cubd
+	url = git@github.com:shocker-0x15/CUBd.git
+[submodule "ext/gl3w"]
+	path = ext/gl3w
+	url = git@github.com:skaslev/gl3w.git
+[submodule "ext/glfw"]
+	path = ext/glfw
+	url = git@github.com:glfw/glfw.git
+[submodule "ext/imgui"]
+	path = ext/imgui
+	url = git@github.com:ocornut/imgui.git
+[submodule "ext/assimp"]
+	path = ext/assimp
+	url = git@github.com:assimp/assimp.git
+[submodule "ext/fpng"]
+	path = ext/fpng
+	url = git@github.com:richgel999/fpng.git
+[submodule "ext/stb"]
+	path = ext/stb
+	url = https://github.com/nothings/stb
+[submodule "ext/tinyexr"]
+	path = ext/tinyexr
+	url = git@github.com:syoyo/tinyexr.git
