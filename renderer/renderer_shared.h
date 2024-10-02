@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "../common/common_renderer_types.h"
 
@@ -15,9 +15,9 @@ struct PathTracingRayType {
         NumTypes
     } value;
 
-    CUDA_DEVICE_FUNCTION constexpr PathTracingRayType(Value v = Closest) : value(v) {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr PathTracingRayType(Value v = Closest) : value(v) {}
 
-    CUDA_DEVICE_FUNCTION operator uint32_t() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE operator uint32_t() const {
         return static_cast<uint32_t>(value);
     }
 };
@@ -29,9 +29,23 @@ struct LightTracingRayType {
         NumTypes
     } value;
 
-    CUDA_DEVICE_FUNCTION constexpr LightTracingRayType(Value v = Closest) : value(v) {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr LightTracingRayType(Value v = Closest) : value(v) {}
 
-    CUDA_DEVICE_FUNCTION operator uint32_t() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE operator uint32_t() const {
+        return static_cast<uint32_t>(value);
+    }
+};
+
+struct LvcBptRayType {
+    enum Value {
+        Closest,
+        Visibility,
+        NumTypes
+    } value;
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr LvcBptRayType(Value v = Closest) : value(v) {}
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE operator uint32_t() const {
         return static_cast<uint32_t>(value);
     }
 };
@@ -49,6 +63,54 @@ struct LightSample {
 
 
 
+struct SurfacePointIdentifier {
+    uint32_t instSlot;
+    uint32_t geomInstSlot;
+    uint32_t primIndex;
+    float bcB;
+    float bcC;
+};
+
+
+
+// TODO: キャッシュラインサイズの考慮。
+struct LightPathVertex {
+    union {
+        struct {
+            uint32_t instSlot;
+            uint32_t geomInstSlot;
+            uint32_t primIndex;
+            float bcB, bcC;
+            Vector3D dirInLocal;
+        };
+        struct {
+            Point3D positionInMedium;
+            Vector3D dirInInMedium;
+        };
+    };
+    float probDensity;
+    float prevProbDensity;
+    float secondPrevPartialDenomMisWeight; // minus prob ratio to the strategy of implicit light sampling
+    float secondPrevProbRatioToFirst; // prob ratio of implicit light sampling
+    float backwardConversionFactor;
+    SampledSpectrum flux;
+    uint32_t wlSelected : 1;
+    uint32_t deltaSampled : 1;
+    uint32_t prevDeltaSampled : 1;
+    uint32_t pathLength : 16;
+    uint32_t isInMedium : 1;
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE LightPathVertex() {}
+};
+
+
+
+struct LvcBptPassInfo {
+    WavelengthSamples wls;
+    float wlPDens;
+    uint32_t numLightVertices;
+};
+
 struct StaticPipelineLaunchParameters {
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_xbar;
     DiscretizedSpectrumAlwaysSpectral::CMF DiscretizedSpectrum_ybar;
@@ -63,21 +125,25 @@ struct StaticPipelineLaunchParameters {
     const UpsampledSpectrum::PolynomialCoefficients* UpsampledSpectrum_coefficients_sRGB_E;
 #endif
 
-    BSDFProcedureSet* bsdfProcedureSets;
-    SurfaceMaterial* surfaceMaterials;
-    GeometryInstance* geometryInstances;
-    GeometryGroup* geometryGroups;
+    ROBuffer<BSDFProcedureSet> bsdfProcedureSets;
+    ROBuffer<SurfaceMaterial> surfaceMaterials;
+    ROBuffer<GeometryInstance> geometryInstances;
+    ROBuffer<GeometryGroup> geometryGroups;
 
     int2 imageSize;
-    float samleSizeCorrectionFactor;
     optixu::NativeBlockBuffer2D<PCG32RNG> rngBuffer;
-    PCG32RNG* ltRngBuffer;
+    RWBuffer<PCG32RNG> ltRngBuffer;
     optixu::BlockBuffer2D<DiscretizedSpectrum, 0> ltTargetBuffer;
     optixu::BlockBuffer2D<SpectrumStorage, 0> accumBuffer;
+
+    // LVC-BPT
+    RWBuffer<LightPathVertex> lightVertexCache;
+    LvcBptPassInfo* lvcBptPassInfo;
+    uint32_t numLightPaths;
 };
 
 struct PerFramePipelineLaunchParameters {
-    Instance* instances;
+    ROBuffer<Instance> instances;
 
     EnvironmentalLight envLight;
 

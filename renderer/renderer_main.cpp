@@ -162,6 +162,8 @@ static cudau::TypedBuffer<UpsampledSpectrum::spectrum_grid_cell_t> UpsampledSpec
 static cudau::TypedBuffer<UpsampledSpectrum::spectrum_data_point_t> UpsampledSpectrum_spectrum_data_points;
 
 static cudau::TypedBuffer<shared::PCG32RNG> ltRngBuffer;
+static cudau::TypedBuffer<shared::LightPathVertex> lightVertexCache;
+static cudau::TypedBuffer<shared::LvcBptPassInfo> lvcBptPassInfo;
 static constexpr uint32_t numLightTracingPaths = 1024 * 1024;
 
 static void setUpPipelineLaunchParameters(uint32_t screenWidth, uint32_t screenHeight) {
@@ -201,7 +203,8 @@ static void setUpPipelineLaunchParameters(uint32_t screenWidth, uint32_t screenH
             UpsampledSpectrum_coefficients_sRGB_E.getDevicePointer();
 #endif
 
-        staticPlpOnHost.bsdfProcedureSets = g_gpuEnv.bsdfProcedureSetBuffer.getDevicePointer();
+        staticPlpOnHost.bsdfProcedureSets =
+            g_gpuEnv.bsdfProcedureSetBuffer.getROBuffer<shared::enableBufferOobCheck>();
         staticPlpOnHost.surfaceMaterials = g_scene.getSurfaceMaterialsOnDevice();
         staticPlpOnHost.geometryInstances = g_scene.getGeometryInstancesOnDevice();
         staticPlpOnHost.geometryGroups = g_scene.getGeometryGroupsOnDevice();
@@ -210,8 +213,6 @@ static void setUpPipelineLaunchParameters(uint32_t screenWidth, uint32_t screenH
         staticPlpOnHost.rngBuffer = rngBuffer.getSurfaceObject(0);
         staticPlpOnHost.ltTargetBuffer = ltTargetBuffer.getBlockBuffer2D();
         staticPlpOnHost.accumBuffer = accumBuffer.getBlockBuffer2D();
-        staticPlpOnHost.samleSizeCorrectionFactor =
-            static_cast<float>(screenWidth * screenHeight) / numLightTracingPaths;
 
         ltRngBuffer.initialize(g_gpuEnv.cuContext, bufferType, numLightTracingPaths);
         {
@@ -223,7 +224,13 @@ static void setUpPipelineLaunchParameters(uint32_t screenWidth, uint32_t screenH
             }
             ltRngBuffer.unmap();
         }
-        staticPlpOnHost.ltRngBuffer = ltRngBuffer.getDevicePointer();
+        staticPlpOnHost.ltRngBuffer = ltRngBuffer.getROBuffer<shared::enableBufferOobCheck>();
+
+        lightVertexCache.initialize(g_gpuEnv.cuContext, bufferType, 10 * numLightTracingPaths);
+        staticPlpOnHost.lightVertexCache = lightVertexCache.getRWBuffer<shared::enableBufferOobCheck>();
+        lvcBptPassInfo.initialize(g_gpuEnv.cuContext, bufferType, 1);
+        staticPlpOnHost.lvcBptPassInfo = lvcBptPassInfo.getDevicePointer();
+        staticPlpOnHost.numLightPaths = numLightTracingPaths;
     }
     CUDADRV_CHECK(cuMemAlloc(&staticPlpOnDevice, sizeof(staticPlpOnHost)));
     CUDADRV_CHECK(cuMemcpyHtoD(staticPlpOnDevice, &staticPlpOnHost, sizeof(staticPlpOnHost)));
@@ -674,6 +681,7 @@ static int32_t runGuiApp() {
         gpuTimer.initialize();
 
     std::mt19937 perFrameRng(72139121);
+    std::uniform_real_distribution<float> u01;
 
     while (true) {
         cpuTimer.start();
@@ -707,8 +715,6 @@ static int32_t runGuiApp() {
                 staticPlpOnHost.rngBuffer = rngBuffer.getSurfaceObject(0);
                 staticPlpOnHost.ltTargetBuffer = ltTargetBuffer.getBlockBuffer2D();
                 staticPlpOnHost.accumBuffer = accumBuffer.getBlockBuffer2D();
-                staticPlpOnHost.samleSizeCorrectionFactor =
-                    static_cast<float>(renderTargetSizeX * renderTargetSizeY) / numLightTracingPaths;
             }
             CUDADRV_CHECK(cuMemcpyHtoD(staticPlpOnDevice, &staticPlpOnHost, sizeof(staticPlpOnHost)));
 
@@ -871,7 +877,7 @@ static int32_t runGuiApp() {
 
         // Debug Window
         bool resetAccumulation = false;
-        static bool enableVolume = true;
+        static bool enableVolume = /*true*/false;
         static float log10VolumeDensity = -1.0f;
         static float scatteringAlbedo = 0.1f;
         {
@@ -1032,6 +1038,7 @@ static int32_t runGuiApp() {
 
         curGpuTimer.rendering.start(curCuStream);
 
+#if 0
         g_gpuEnv.pathTracing.setEntryPoint(PathTracingEntryPoint::pathTrace);
         g_gpuEnv.pathTracing.optixPipeline.launch(
             curCuStream, plpOnDevice, renderTargetSizeX, renderTargetSizeY, 1);
@@ -1043,6 +1050,38 @@ static int32_t runGuiApp() {
         g_gpuEnv.lightTracing.optixPipeline.launch(
             curCuStream, plpOnDevice, numLightTracingPaths, 1, 1);
         //CUDADRV_CHECK(cuStreamSynchronize(curCuStream));
+#else
+        shared::LvcBptPassInfo lvcBptPassInfoOnHost = {};
+        lvcBptPassInfoOnHost.wls = WavelengthSamples::createWithEqualOffsets(
+            u01(perFrameRng), u01(perFrameRng), &lvcBptPassInfoOnHost.wlPDens);
+        lvcBptPassInfoOnHost.numLightVertices = 0;
+        CUDADRV_CHECK(cuMemcpyHtoDAsync(
+            lvcBptPassInfo.getCUdeviceptr(), &lvcBptPassInfoOnHost,
+            sizeof(lvcBptPassInfoOnHost), curCuStream));
+
+        g_gpuEnv.lvcBpt.setEntryPoint(LvcBptEntryPoint::generateLightVertices);
+        g_gpuEnv.lvcBpt.optixPipeline.launch(
+            curCuStream, plpOnDevice, numLightTracingPaths, 1, 1);
+        CUDADRV_CHECK(cuStreamSynchronize(curCuStream));
+        CUDADRV_CHECK(cuMemcpyDtoH(
+            &lvcBptPassInfoOnHost, lvcBptPassInfo.getCUdeviceptr(),
+            sizeof(lvcBptPassInfoOnHost)));
+        std::vector<shared::LightPathVertex> lightVertexCacheOnHost = lightVertexCache;
+        std::vector<uint32_t> counts;
+        for (uint32_t i = 0; i < lvcBptPassInfoOnHost.numLightVertices; ++i) {
+            const shared::LightPathVertex &v = lightVertexCacheOnHost[i];
+            if (v.pathLength >= counts.size())
+                counts.resize(v.pathLength + 1, 0u);
+            ++counts[v.pathLength];
+
+            if (v.pathLength == 1)
+                printf("");
+            else if (v.pathLength == 2)
+                printf("");
+            else if (v.pathLength == 3)
+                printf("");
+        }
+#endif
 
         curGpuTimer.rendering.stop(curCuStream);
 

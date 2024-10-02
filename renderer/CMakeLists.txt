@@ -15,6 +15,7 @@ set(
     OPTIX_KERNELS
     "gpu_kernels/optix_pathtracing_kernels.cu"
     "gpu_kernels/optix_lighttracing_kernels.cu"
+    "gpu_kernels/optix_lvc_bpt_kernels.cu"
 )
 
 set(

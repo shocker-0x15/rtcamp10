@@ -25,8 +25,9 @@ CUDA_DEVICE_KERNEL void applyToneMap() {
         launchIndex.y >= plp.s->imageSize.y)
         return;
 
+    const float imageSizeCorrFactor = plp.s->imageSize.x * plp.s->imageSize.y;
     plp.s->accumBuffer[launchIndex].add(
-        plp.s->ltTargetBuffer[launchIndex] * plp.s->samleSizeCorrectionFactor);
+        plp.s->ltTargetBuffer[launchIndex] * imageSizeCorrFactor);
     const DiscretizedSpectrum &accumResult = plp.s->accumBuffer[launchIndex].getValue().result;
     float colorXYZ[3];
     accumResult.toXYZ(colorXYZ);
@@ -49,6 +50,8 @@ CUDA_DEVICE_KERNEL void applyToneMap() {
 
     plp.f->outputBuffer.write(launchIndex, output);
 }
+
+
 
 CUDA_DEVICE_KERNEL void clearLtTargetBuffer() {
     const uint2 launchIndex = make_uint2(

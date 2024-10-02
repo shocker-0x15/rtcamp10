@@ -15,30 +15,22 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
     uint2 launchIndex = make_uint2(optixGetLaunchIndex());
     PCG32RNG rng = plp.s->rngBuffer.read(launchIndex);
 
+    const PerspectiveCamera &camera = plp.f->camera;
+
     Point3D rayOrigin;
     Vector3D rayDirection;
-    float dirPDensity;
     float cosX0;
-    {
-        const PerspectiveCamera &camera = plp.f->camera;
-        float px = (launchIndex.x + rng.getFloat0cTo1o()) / plp.s->imageSize.x;
-        float py = (launchIndex.y + rng.getFloat0cTo1o()) / plp.s->imageSize.y;
-        float vh = 2 * std::tan(camera.fovY * 0.5f);
-        float vw = camera.aspect * vh;
-        float sensorArea = vw * vh; // normalized
-
-        rayOrigin = camera.position;
-        Vector3D localRayDir = Vector3D(vw * (-0.5f + px), vh * (0.5f - py), -1).normalize();
-        rayDirection = normalize(camera.orientation.toMatrix3x3() * localRayDir);
-        cosX0 = std::fabs(localRayDir.z);
-        dirPDensity = 1 / (pow3(cosX0) * sensorArea);
-    }
+    float dirPDensity;
+    const float2 screenPos(
+        (launchIndex.x + rng.getFloat0cTo1o()) / plp.s->imageSize.x,
+        (launchIndex.y + rng.getFloat0cTo1o()) / plp.s->imageSize.y);
+    const SampledSpectrum We = camera.sampleRay(screenPos, &rayOrigin, &rayDirection, &dirPDensity, &cosX0);
 
     float wlPDensity;
     auto wls = WavelengthSamples::createWithEqualOffsets(rng.getFloat0cTo1o(), rng.getFloat0cTo1o(), &wlPDensity);
 
     auto contribution = SampledSpectrum::Zero();
-    auto throughput = SampledSpectrum::One() * (cosX0 / (dirPDensity * wlPDensity));
+    SampledSpectrum throughput = We * (cosX0 / (dirPDensity * wlPDensity));
     float initImportance = throughput.importance(wls.selectedLambdaIndex());
     uint32_t pathLength = 0;
     while (true) {
@@ -74,13 +66,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
         uint32_t surfMatSlot = 0xFFFFFFFF;
         if (volEventHappens) {
             interPt.position = rayOrigin + hitDist * rayDirection;
-            interPt.shadingFrame = ReferenceFrame(-rayDirection);
+            interPt.shadingFrame = ReferenceFrame(rayDirection);
             interPt.inMedium = true;
         }
         else {
             const Instance &inst = plp.f->instances[instSlot];
             const GeometryInstance &geomInst = plp.s->geometryInstances[geomInstSlot];
-            computeSurfacePoint(inst, geomInst, primIndex, b1, b2, &interPt);
+            computeSurfacePoint<true>(inst, geomInst, primIndex, b1, b2, &interPt);
 
             surfMatSlot = geomInst.surfMatSlot;
 
@@ -121,7 +113,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
         if (rng.getFloat0cTo1o() >= continueProb)
             break;
 
-        BSDF bsdf;
+        constexpr TransportMode transportMode = TransportMode::Radiance;
+        BSDF<transportMode, BSDFGrade::Unidirectional> bsdf;
         BSDFQuery bsdfQuery;
         if (volEventHappens) {
             bsdf.setup(plp.f->scatteringAlbedo);
@@ -130,7 +123,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
         else {
             const SurfaceMaterial &surfMat = plp.s->surfaceMaterials[surfMatSlot];
             bsdf.setup(surfMat, interPt.asSurf.texCoord, wls);
-            bsdfQuery = BSDFQuery(vOutLocal, interPt.toLocal(interPt.asSurf.geometricNormal), wls);
+            bsdfQuery = BSDFQuery(
+                vOutLocal, interPt.toLocal(interPt.asSurf.geometricNormal),
+                transportMode, wls);
         }
 
         throughput /= continueProb;

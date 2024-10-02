@@ -1789,6 +1789,13 @@ CUDA_COMMON_FUNCTION CUDA_INLINE constexpr RealType squaredDistance(
     return vector.squaredLength();
 }
 
+template <typename RealType>
+CUDA_COMMON_FUNCTION CUDA_INLINE constexpr RealType distance(
+    const Point3DTemplate<RealType> &va, const Point3DTemplate<RealType> &vb) {
+    Vector3DTemplate<RealType> vector = vb - va;
+    return vector.length();
+}
+
 // END: Point3D operators and functions
 // ----------------------------------------------------------------
 

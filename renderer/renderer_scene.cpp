@@ -197,6 +197,72 @@ void GPUEnvironment::initialize() {
         pipeline.sbt.setMappedMemoryPersistent(true);
         p.setShaderBindingTable(pipeline.sbt, pipeline.sbt.getMappedPointer());
     }
+
+    {
+        Pipeline<LvcBptEntryPoint> &pipeline = lvcBpt;
+        optixu::Pipeline &p = pipeline.optixPipeline;
+        optixu::Module &m = pipeline.optixModule;
+        p = optixContext.createPipeline();
+
+        p.setPipelineOptions(
+            std::max({
+                shared::ClosestRaySignature::numDwords,
+                shared::VisibilityRaySignature::numDwords
+                     }),
+            optixu::calcSumDwords<float2>(),
+            "plp", sizeof(shared::PipelineLaunchParameters),
+            OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING,
+            OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW | OPTIX_EXCEPTION_FLAG_TRACE_DEPTH |
+            /*DEBUG_SELECT(OPTIX_EXCEPTION_FLAG_DEBUG, */OPTIX_EXCEPTION_FLAG_NONE/*)*/,
+            OPTIX_PRIMITIVE_TYPE_FLAGS_TRIANGLE);
+
+        m = p.createModuleFromPTXString(
+            readTxtFile(getExecutableDirectory() / "renderer/ptxes/optix_lvc_bpt_kernels.ptx"),
+            OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT,
+            /*DEBUG_SELECT(OPTIX_COMPILE_OPTIMIZATION_LEVEL_0, */OPTIX_COMPILE_OPTIMIZATION_DEFAULT/*)*/,
+            /*DEBUG_SELECT(OPTIX_COMPILE_DEBUG_LEVEL_FULL, */OPTIX_COMPILE_DEBUG_LEVEL_NONE/*)*/);
+
+        pipeline.entryPoints[LvcBptEntryPoint::generateLightVertices] =
+            p.createRayGenProgram(m, RT_RG_NAME_STR("generateLightVertices"));
+
+        optixu::HitProgramGroup getHitInfo = p.createHitProgramGroupForTriangleIS(
+            m, RT_CH_NAME_STR("getHitInfo"),
+            emptyModule, nullptr);
+        pipeline.hitPrograms[RT_CH_NAME_STR("getHitInfo")] = getHitInfo;
+
+        optixu::HitProgramGroup visibility = p.createHitProgramGroupForTriangleIS(
+            emptyModule, nullptr,
+            m, RT_AH_NAME_STR("visibility"));
+        pipeline.hitPrograms[RT_AH_NAME_STR("visibility")] = visibility;
+
+        optixu::Program emptyMiss = p.createMissProgram(emptyModule, nullptr);
+        pipeline.missPrograms["emptyMiss"] = emptyMiss;
+
+        p.setNumMissRayTypes(shared::LvcBptRayType::NumTypes);
+        p.setMissProgram(shared::LvcBptRayType::Closest, emptyMiss);
+        p.setMissProgram(shared::LvcBptRayType::Visibility, emptyMiss);
+
+        p.setNumCallablePrograms(NumCallablePrograms);
+        pipeline.callablePrograms.resize(NumCallablePrograms);
+        for (int i = 0; i < NumCallablePrograms; ++i) {
+            optixu::CallableProgramGroup program = p.createCallableProgramGroup(
+                m, callableProgramEntryPoints[i],
+                emptyModule, nullptr);
+            pipeline.callablePrograms[i] = program;
+            p.setCallableProgram(i, program);
+        }
+
+        p.link(1);
+
+        optixDefaultMaterial.setHitGroup(shared::LvcBptRayType::Closest, getHitInfo);
+        optixDefaultMaterial.setHitGroup(shared::LvcBptRayType::Visibility, visibility);
+
+        size_t sbtSize;
+        p.generateShaderBindingTableLayout(&sbtSize);
+        pipeline.sbt.initialize(cuContext, bufferType, sbtSize, 1);
+        pipeline.sbt.setMappedMemoryPersistent(true);
+        p.setShaderBindingTable(pipeline.sbt, pipeline.sbt.getMappedPointer());
+    }
 }
 
 
@@ -287,6 +353,20 @@ void Scene::setUpDeviceDataBuffers(CUstream stream, float timePoint) {
         }
         g_gpuEnv.lightTracing.optixPipeline.setScene(m_optixScene);
         g_gpuEnv.lightTracing.optixPipeline.setHitGroupShaderBindingTable(
+            hitGroupSbt, hitGroupSbt.getMappedPointer());
+    }
+
+    {
+        cudau::Buffer &hitGroupSbt = g_gpuEnv.lvcBpt.hitGroupSbt;
+        if (!hitGroupSbt.isInitialized()) {
+            hitGroupSbt.initialize(g_gpuEnv.cuContext, bufferType, hitGroupSbtSize, 1);
+            hitGroupSbt.setMappedMemoryPersistent(true);
+        }
+        else if (hitGroupSbt.sizeInBytes() < hitGroupSbtSize) {
+            hitGroupSbt.resize(hitGroupSbtSize, 1);
+        }
+        g_gpuEnv.lvcBpt.optixPipeline.setScene(m_optixScene);
+        g_gpuEnv.lvcBpt.optixPipeline.setHitGroupShaderBindingTable(
             hitGroupSbt, hitGroupSbt.getMappedPointer());
     }
 

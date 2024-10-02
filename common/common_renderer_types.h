@@ -118,17 +118,25 @@ namespace rtc10 {
     PROCESS_DYNAMIC_FUNCTION(readModifiedNormalFromHeightMap), \
     PROCESS_DYNAMIC_FUNCTION(setupLambertBRDF), \
     PROCESS_DYNAMIC_FUNCTION(LambertBRDF_getSurfaceParameters), \
-    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_sampleF), \
-    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluateF), \
-    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluatePDF), \
     PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluateDHReflectanceEstimate), \
+    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_matches), \
+    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_sampleF), \
+    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_sampleFWithRev), \
+    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluateF), \
+    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluateFWithRev), \
+    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluatePDF), \
+    PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluatePDFWithRev), \
     PROCESS_DYNAMIC_FUNCTION(setupDichromaticBRDF), \
     PROCESS_DYNAMIC_FUNCTION(setupSimplePBR_BRDF), \
     PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_getSurfaceParameters), \
-    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_sampleF), \
-    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_evaluateF), \
-    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_evaluatePDF), \
     PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_evaluateDHReflectanceEstimate), \
+    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_matches), \
+    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_sampleF), \
+    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_sampleFWithRev), \
+    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_evaluateF), \
+    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_evaluateFWithRev), \
+    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_evaluatePDF), \
+    PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_evaluatePDFWithRev), \
     PROCESS_DYNAMIC_FUNCTION(ImageBasedEnvironmentalLight_sample), \
     PROCESS_DYNAMIC_FUNCTION(ImageBasedEnvironmentalLight_evaluate),
 
@@ -184,6 +192,12 @@ CUDA_DEVICE_FUNCTION bool getDebugPrintEnabled();
 
 
 namespace rtc10::shared {
+
+static constexpr bool enableBufferOobCheck = true;
+template <typename T>
+using ROBuffer = cudau::ROBufferTemplate<T, enableBufferOobCheck>;
+template <typename T>
+using RWBuffer = cudau::RWBufferTemplate<T, enableBufferOobCheck>;
 
 CUDA_COMMON_FUNCTION CUDA_INLINE constexpr uint32_t mapPrimarySampleToDiscrete(
     float u01, uint32_t numValues, float* uRemapped = nullptr) {
@@ -945,11 +959,19 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr DirectionType operator|(
 
 
 
+enum class TransportMode {
+    Radiance = 0,
+    Importance,
+};
+
+
+
 struct SurfaceMaterial;
 
 struct BSDFBuildFlags {
     enum Value {
         None = 0,
+        FromEDF,
     } value;
 
     CUDA_COMMON_FUNCTION constexpr BSDFBuildFlags(Value v = None) : value(v) {}
@@ -962,12 +984,16 @@ struct BSDFBuildFlags {
 struct BSDFQuery {
     Vector3D dirLocal;
     Normal3D geometricNormalLocal;
+    uint32_t transportMode : 2;
     uint32_t wlHint : 1;
 
     CUDA_COMMON_FUNCTION BSDFQuery() {}
     CUDA_COMMON_FUNCTION BSDFQuery(
-        const Vector3D &dirL, const Normal3D &gNormL, const WavelengthSamples &wls) :
-        dirLocal(dirL), geometricNormalLocal(gNormL), wlHint(wls.selectedLambdaIndex()) {}
+        const Vector3D &dirL, const Normal3D &gNormL,
+        TransportMode transMode, const WavelengthSamples &wls) :
+        dirLocal(dirL), geometricNormalLocal(gNormL),
+        transportMode(static_cast<uint32_t>(transMode)),
+        wlHint(wls.selectedLambdaIndex()) {}
 };
 
 struct BSDFSample {
@@ -986,28 +1012,73 @@ struct BSDFQueryResult {
     CUDA_COMMON_FUNCTION BSDFQueryResult() {}
 };
 
-using SetupBSDFBody = DynamicFunction<
-    void(const SurfaceMaterial &matData, TexCoord2D texCoord, uint32_t* bodyData, BSDFBuildFlags flags)>;
+struct BSDFQueryReverseResult {
+    SampledSpectrum fsValue;
+    float dirPDensity;
+};
 
-using BSDFGetSurfaceParameters = DynamicFunction<
-    void(const uint32_t* data,
-         SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness)>;
-using BSDFSampleF = DynamicFunction<
-    SampledSpectrum(const uint32_t* data, const BSDFQuery &query, const BSDFSample &sample, BSDFQueryResult* result)>;
-using BSDFEvaluateF = DynamicFunction<
-    SampledSpectrum(const uint32_t* data, const BSDFQuery &query, const Vector3D &vSampled)>;
-using BSDFEvaluatePDF = DynamicFunction<
-    float(const uint32_t* data, const BSDFQuery &query, const Vector3D &vSampled)>;
+using SetupBSDFBody = DynamicFunction<void(
+    const SurfaceMaterial &matData, TexCoord2D texCoord,
+    uint32_t* bodyData, BSDFBuildFlags flags)>;
+
+using BSDFGetSurfaceParameters = DynamicFunction<void(
+    const uint32_t* data,
+    SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness)>;
 using BSDFEvaluateDHReflectanceEstimate = DynamicFunction<
     SampledSpectrum(const uint32_t* data, const BSDFQuery &query)>;
+
+using BSDFMatches = DynamicFunction<bool(
+    const uint32_t* data, DirectionType dirType)>;
+using BSDFSampleF = DynamicFunction<SampledSpectrum(
+    const uint32_t* data, const BSDFQuery &query, const BSDFSample &sample,
+    BSDFQueryResult* result)>;
+using BSDFSampleFWithRev = DynamicFunction<SampledSpectrum(
+    const uint32_t* data, const BSDFQuery &query, const BSDFSample &sample,
+    BSDFQueryResult* result, BSDFQueryReverseResult* revResult)>;
+using BSDFEvaluateF = DynamicFunction<SampledSpectrum(
+    const uint32_t* data, const BSDFQuery &query, const Vector3D &vSampled)>;
+using BSDFEvaluateFWithRev = DynamicFunction<SampledSpectrum(
+    const uint32_t* data, const BSDFQuery &query, const Vector3D &vSampled,
+    SampledSpectrum* revValue)>;
+using BSDFEvaluatePDF = DynamicFunction<float(
+    const uint32_t* data, const BSDFQuery &query, const Vector3D &vSampled)>;
+using BSDFEvaluatePDFWithRev = DynamicFunction<float(
+    const uint32_t* data, const BSDFQuery &query, const Vector3D &vSampled,
+    float* revValue)>;
 
 struct BSDFProcedureSet {
     SetupBSDFBody setupBSDFBody;
     BSDFGetSurfaceParameters getSurfaceParameters;
-    BSDFSampleF sampleF;
-    BSDFEvaluateF evaluateF;
-    BSDFEvaluatePDF evaluatePDF;
     BSDFEvaluateDHReflectanceEstimate evaluateDHReflectanceEstimate;
+    BSDFMatches matches;
+    BSDFSampleF sampleF;
+    BSDFSampleFWithRev sampleFWithRev;
+    BSDFEvaluateF evaluateF;
+    BSDFEvaluateFWithRev evaluateFWithRev;
+    BSDFEvaluatePDF evaluatePDF;
+    BSDFEvaluatePDFWithRev evaluatePDFWithRev;
+};
+
+
+
+struct EDFQuery {
+    CUDA_COMMON_FUNCTION EDFQuery() {}
+};
+
+struct EDFSample {
+    float uDir[2];
+
+    CUDA_COMMON_FUNCTION EDFSample() {}
+    CUDA_COMMON_FUNCTION EDFSample(float uDir0, float uDir1) :
+        uDir{ uDir0, uDir1 } {}
+};
+
+struct EDFQueryResult {
+    Vector3D dirLocal;
+    float dirPDensity;
+    DirectionType sampledType;
+
+    CUDA_COMMON_FUNCTION EDFQueryResult() {}
 };
 
 
@@ -1125,15 +1196,51 @@ struct PerspectiveCamera {
     Point3D position;
     Quaternion orientation;
 
-    CUDA_COMMON_FUNCTION float2 calcScreenPosition(const Point3D &posInWorld) const {
-        Matrix3x3 invOri = conjugate(orientation).toMatrix3x3();
-        Vector3D posInView = invOri * (posInWorld - position);
-        float z = std::fabs(posInView.z);
-        float2 posAtZ1 = make_float2(posInView.x / z, posInView.y / z);
-        float h = 2 * std::tan(fovY / 2);
-        float w = aspect * h;
-        return make_float2(0.5f + posAtZ1.x / w,
-                           0.5f - posAtZ1.y / h);
+    CUDA_COMMON_FUNCTION CUDA_INLINE SampledSpectrum sampleRay(
+        const float2 &screenPos, Point3D* const rayOrg, Vector3D* const rayDir,
+        float* const dirPDens, float* const cosTerm) const
+    {
+        const float vh = 2 * std::tan(fovY * 0.5f);
+        const float vw = aspect * vh;
+        const float sensorArea = vw * vh; // normalized
+
+        *rayOrg = position;
+        const Vector3D localRayDir = normalize(Vector3D(
+            vw * (-0.5f + screenPos.x), vh * (0.5f - screenPos.y), -1));
+        *rayDir = orientation.toMatrix3x3() * localRayDir;
+        *cosTerm = -localRayDir.z;
+        *dirPDens = 1 / (pow3(*cosTerm) * sensorArea);
+
+        return SampledSpectrum::One(); // We0 * We1
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE bool calcScreenPosition(
+        const Point3D &posInWorld,
+        SampledSpectrum* const We, float2* const screenPos,
+        float* const dirPDens, float* const cosTerm, float* const dist2) const
+    {
+        const Vector3D rayDir = posInWorld - position;
+        const Matrix3x3 invOri = conjugate(orientation).toMatrix3x3();
+        Vector3D localRayDir = invOri * rayDir;
+        if (localRayDir.z >= 0.0f) {
+            *We = SampledSpectrum::Zero();
+            *dirPDens = 0.0f;
+            return false;
+        }
+        *dist2 = rayDir.squaredLength();
+        localRayDir /= std::sqrt(*dist2);
+
+        const float vh = 2 * std::tan(fovY / 2);
+        const float vw = aspect * vh;
+        const float sensorArea = vw * vh; // normalized
+
+        *cosTerm = -localRayDir.z;
+        const float2 posAtZ1 = make_float2(localRayDir.x / *cosTerm, localRayDir.y / *cosTerm);
+        *We = SampledSpectrum::One(); // We0 * We1
+        *screenPos = make_float2(0.5f + posAtZ1.x / vw, 0.5f - posAtZ1.y / vh);
+        *dirPDens = 1 / (pow3(*cosTerm) * sensorArea);
+
+        return true;
     }
 };
 
@@ -1151,8 +1258,8 @@ struct Triangle {
 };
 
 struct GeometryInstance {
-    const Vertex* vertices;
-    const Triangle* triangles;
+    ROBuffer<Vertex> vertices;
+    ROBuffer<Triangle> triangles;
     CUtexObject normal;
     TexDimInfo normalDimInfo;
     ReadModifiedNormal readModifiedNormal;
@@ -1211,7 +1318,7 @@ struct StaticTransform {
 };
 
 struct GeometryGroup {
-    const uint32_t* geomInstSlots;
+    ROBuffer<uint32_t> geomInstSlots;
     LightDistribution lightGeomInstDist;
     LightDistribution dirLightGeomInstDist;
     BoundingBox3D aabb;
@@ -1458,49 +1565,30 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE /*constexpr*/ Point3D offsetRayOrigin(
 
 
 
-CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr TexCoord2D adjustTexCoord(
-    shared::TexDimInfo dimInfo, const TexCoord2D &texCoord) {
-    TexCoord2D mTexCoord = texCoord;
-    if (dimInfo.isNonPowerOfTwo && dimInfo.isBCTexture) {
-        uint32_t bcWidth = (dimInfo.dimX + 3) / 4 * 4;
-        uint32_t bcHeight = (dimInfo.dimY + 3) / 4 * 4;
-        mTexCoord.u *= static_cast<float>(dimInfo.dimX) / bcWidth;
-        mTexCoord.v *= static_cast<float>(dimInfo.dimY) / bcHeight;
-    }
-    return mTexCoord;
-}
-
-template <typename T>
-CUDA_DEVICE_FUNCTION CUDA_INLINE T sample(
-    CUtexObject texture, shared::TexDimInfo dimInfo, const TexCoord2D &texCoord) {
-    TexCoord2D mTexCoord = adjustTexCoord(dimInfo, texCoord);
-    return tex2DLod<T>(texture, mTexCoord.u, mTexCoord.v, 0.0f);
-}
-
-
-
 struct ReferenceFrame {
     Vector3D tangent;
     Vector3D bitangent;
     Normal3D normal;
 
-    CUDA_DEVICE_FUNCTION ReferenceFrame() {}
-    CUDA_DEVICE_FUNCTION constexpr ReferenceFrame(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE ReferenceFrame() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr ReferenceFrame(
         const Vector3D &_tangent, const Vector3D &_bitangent, const Normal3D &_normal) :
         tangent(_tangent), bitangent(_bitangent), normal(_normal) {}
-    CUDA_DEVICE_FUNCTION /*constexpr*/ ReferenceFrame(const Normal3D &_normal) :
+    CUDA_DEVICE_FUNCTION CUDA_INLINE /*constexpr*/ ReferenceFrame(const Normal3D &_normal) :
         normal(_normal) {
         normal.makeCoordinateSystem(&tangent, &bitangent);
     }
-    CUDA_DEVICE_FUNCTION /*constexpr*/ ReferenceFrame(const Normal3D &_normal, const Vector3D &_tangent) :
-        tangent(_tangent), normal(_normal) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE /*constexpr*/ ReferenceFrame(
+        const Normal3D &_normal, const Vector3D &_tangent) :
+        tangent(_tangent), normal(_normal)
+    {
         bitangent = cross(normal, tangent);
     }
 
-    CUDA_DEVICE_FUNCTION constexpr Vector3D toLocal(const Vector3D &v) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr Vector3D toLocal(const Vector3D &v) const {
         return Vector3D(dot(tangent, v), dot(bitangent, v), dot(normal, v));
     }
-    CUDA_DEVICE_FUNCTION constexpr Vector3D fromLocal(const Vector3D &v) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr Vector3D fromLocal(const Vector3D &v) const {
         return Vector3D(dot(Vector3D(tangent.x, bitangent.x, normal.x), v),
                         dot(Vector3D(tangent.y, bitangent.y, normal.y), v),
                         dot(Vector3D(tangent.z, bitangent.z, normal.z), v));
@@ -1533,7 +1621,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void applyBumpMapping(
 
 RT_CALLABLE_PROGRAM Normal3D RT_DC_NAME(readModifiedNormalFromNormalMap)
 (CUtexObject texture, shared::TexDimInfo dimInfo, TexCoord2D texCoord) {
-    float4 texValue = sample<float4>(texture, dimInfo, texCoord);
+    float4 texValue = tex2DLod<float4>(texture, texCoord.u, texCoord.v, 0.0f);
     Normal3D modLocalNormal(texValue.x, texValue.y, texValue.z);
     modLocalNormal = 2.0f * modLocalNormal - Normal3D(1.0f);
     if (dimInfo.isLeftHanded)
@@ -1544,7 +1632,7 @@ CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(readModifiedNormalFromNormalMap);
 
 RT_CALLABLE_PROGRAM Normal3D RT_DC_NAME(readModifiedNormalFromNormalMap2ch)
 (CUtexObject texture, shared::TexDimInfo dimInfo, TexCoord2D texCoord) {
-    float2 texValue = sample<float2>(texture, dimInfo, texCoord);
+    float2 texValue = tex2DLod<float2>(texture, texCoord.u, texCoord.v, 0.0f);
     float x = 2.0f * texValue.x - 1.0f;
     float y = 2.0f * texValue.y - 1.0f;
     float z = std::sqrt(1.0f - pow2(x) - pow2(y));
@@ -1587,53 +1675,89 @@ class LambertBRDF {
     SampledSpectrum m_reflectance;
 
 public:
-    CUDA_DEVICE_FUNCTION LambertBRDF() {}
-    CUDA_DEVICE_FUNCTION LambertBRDF(const SampledSpectrum &reflectance) :
+    CUDA_DEVICE_FUNCTION CUDA_INLINE LambertBRDF() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE LambertBRDF(const SampledSpectrum &reflectance) :
         m_reflectance(reflectance) {}
 
-    CUDA_DEVICE_FUNCTION void getSurfaceParameters(
-        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void getSurfaceParameters(
+        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const
+    {
         *diffuseReflectance = m_reflectance;
         *specularReflectance = SampledSpectrum::Zero();
         *roughness = 1.0f;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrum sampleF(
-        const shared::BSDFQuery &query, const shared::BSDFSample &sample,
-        shared::BSDFQueryResult* result) const {
-        result->dirLocal = cosineSampleHemisphere(sample.uDir[0], sample.uDir[1]);
-        result->dirPDensity = result->dirLocal.z / pi_v<float>;
-        if (query.dirLocal.z <= 0.0f)
-            result->dirLocal.z *= -1;
-        return m_reflectance / pi_v<float>;
-    }
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateF(
-        const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        if (query.dirLocal.z * vSampled.z > 0)
-            return m_reflectance / pi_v<float>;
-        else
-            return SampledSpectrum::Zero();
-    }
-    CUDA_DEVICE_FUNCTION float evaluatePDF(const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        if (query.dirLocal.z * vSampled.z > 0)
-            return std::fabs(vSampled.z) / pi_v<float>;
-        else
-            return 0.0f;
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDHReflectanceEstimate(
+        const shared::BSDFQuery &query) const
+    {
+        return m_reflectance;
     }
 
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateDHReflectanceEstimate(const shared::BSDFQuery &query) const {
-        return m_reflectance;
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
+        using namespace shared;
+        constexpr DirectionType type =
+            DirectionType::Reflection() | DirectionType::LowFreq();
+        return type.matches(dirType);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
+        const shared::BSDFQuery &query, const shared::BSDFSample &sample,
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult = nullptr) const
+    {
+        result->dirLocal = cosineSampleHemisphere(sample.uDir[0], sample.uDir[1]);
+        const float oneOverPi = 1.0f / pi_v<float>;
+        result->dirPDensity = result->dirLocal.z * oneOverPi;
+        result->dirLocal.z *= query.dirLocal.z >= 0 ? 1 : -1;
+        const SampledSpectrum fsValue = m_reflectance * oneOverPi;
+        if (revResult) {
+            revResult->fsValue = fsValue;
+            revResult->dirPDensity = std::fabs(query.dirLocal.z) * oneOverPi;
+        }
+        return fsValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        SampledSpectrum* revValue = nullptr) const
+    {
+        if (query.dirLocal.z * vSampled.z <= 0.0f) {
+            const SampledSpectrum fs = SampledSpectrum::Zero();
+            if (revValue)
+                *revValue = fs;
+            return fs;
+        }
+        const float oneOverPi = 1.0f / pi_v<float>;
+        const SampledSpectrum fsValue = m_reflectance * oneOverPi;
+        if (revValue)
+            *revValue = fsValue;
+
+        return fsValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        float* revValue = nullptr) const
+    {
+        if (query.dirLocal.z * vSampled.z <= 0.0f) {
+            if (revValue)
+                *revValue = 0.0f;
+            return 0.0f;
+        }
+        const float oneOverPi = 1.0f / pi_v<float>;
+        const float dirPDens = std::fabs(vSampled.z) * oneOverPi;
+        if (revValue)
+            *revValue = std::fabs(query.dirLocal.z) * oneOverPi;
+
+        return dirPDens;
     }
 };
 
 template<>
 CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<LambertBRDF>(
     const shared::SurfaceMaterial &matData,
-    TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags /*flags*/) {
-    auto &mat = reinterpret_cast<const shared::LambertianSurfaceMaterial &>(matData.body);
-    float4 reflectance = sample<float4>(
-        mat.reflectance, mat.reflectanceDimInfo, texCoord);
+    TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags /*flags*/)
+{
+    const auto &mat = reinterpret_cast<const shared::LambertianSurfaceMaterial &>(matData.body);
+    const float4 reflectance = tex2DLod<float4>(mat.reflectance, texCoord.u, texCoord.v, 0.0f);
     auto &bsdfBody = *reinterpret_cast<LambertBRDF*>(bodyData);
-    TripletSpectrum sp = createTripletSpectrum(
+    const TripletSpectrum sp = createTripletSpectrum(
         SpectrumType::Reflectance, ColorSpace::Rec709_D65, reflectance.x, reflectance.y, reflectance.z);
     bsdfBody = LambertBRDF(sp.evaluate(wls));
 }
@@ -1766,234 +1890,26 @@ protected:
     float m_roughness;
 
 public:
-    CUDA_DEVICE_FUNCTION DichromaticBRDF() {}
-    CUDA_DEVICE_FUNCTION DichromaticBRDF(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE DichromaticBRDF() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE DichromaticBRDF(
         const SampledSpectrum &diffuseColor, const SampledSpectrum &specularF0Color, float smoothness) {
         m_diffuseColor = diffuseColor;
         m_specularF0Color = specularF0Color;
         m_roughness = 1 - smoothness;
     }
 
-    CUDA_DEVICE_FUNCTION void getSurfaceParameters(
-        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void getSurfaceParameters(
+        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const
+    {
         *diffuseReflectance = m_diffuseColor;
         *specularReflectance = m_specularF0Color;
         *roughness = m_roughness;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrum sampleF(
-        const shared::BSDFQuery &query, const shared::BSDFSample &sample,
-        shared::BSDFQueryResult* result) const {
-        GGXMicrofacetDistribution ggx;
-        ggx.alpha_g = m_roughness * m_roughness;
-
-        bool entering = query.dirLocal.z >= 0.0f;
-        Vector3D dirL;
-        Vector3D dirV = entering ? query.dirLocal : -query.dirLocal;
-
-        float oneMinusDotVN5 = pow5(1 - dirV.z);
-
-        float diffuseWeight;
-        float specularWeight;
-        if constexpr (USE_FITTED_PRE_INTEGRATION_FOR_WEIGHTS) {
-            float diffusePreInt;
-            float specularPreIntA, specularPreIntB;
-            calcFittedPreIntegratedTerms(dirV.z, m_roughness, &diffusePreInt, &specularPreIntA, &specularPreIntB);
-
-            diffuseWeight = (m_diffuseColor * diffusePreInt).importance(query.wlHint);
-            specularWeight =
-                (m_specularF0Color * specularPreIntA +
-                 (SampledSpectrum::One() - m_specularF0Color) * specularPreIntB).importance(query.wlHint);
-        }
-        else {
-            float expectedF_D90 = 0.5f * m_roughness + 2 * m_roughness * query.dirLocal.z * query.dirLocal.z;
-            float expectedDiffuseFresnel = lerp(1.0f, expectedF_D90, oneMinusDotVN5);
-            float iBaseColor = m_diffuseColor.importance(query.wlHint) * pow2(expectedDiffuseFresnel) *
-                lerp(1.0f, 1.0f / 1.51f, m_roughness);
-
-            float expectedOneMinusDotVH5 = pow5(1 - dirV.z);
-            float iSpecularF0 = m_specularF0Color.importance(query.wlHint);
-
-            diffuseWeight = iBaseColor;
-            specularWeight = lerp(iSpecularF0, 1.0f, expectedOneMinusDotVH5);
-        }
-        float sumWeights = diffuseWeight + specularWeight;
-        if (sumWeights == 0.0f) {
-            result->dirPDensity = 0.0f;
-            return SampledSpectrum::Zero();
-        }
-
-        float uDir1 = sample.uDir[1];
-        float uComponent = uDir1;
-
-        float diffuseDirPDF, specularDirPDF;
-        Normal3D m;
-        float dotLH;
-        float D;
-        if (sumWeights * uComponent < diffuseWeight) {
-            uDir1 = (sumWeights * uComponent - 0) / diffuseWeight;
-
-            // JP: コサイン分布からサンプルする。
-            // EN: sample based on cosine distribution.
-            dirL = cosineSampleHemisphere(sample.uDir[0], uDir1);
-            diffuseDirPDF = dirL.z / pi_v<float>;
-
-            // JP: 同じ方向サンプルをスペキュラー層からサンプルする確率密度を求める。
-            // EN: calculate PDF to generate the sampled direction from the specular layer.
-            m = halfVector(dirL, dirV);
-            dotLH = min(dot(dirL, m), 1.0f);
-            float commonPDFTerm = 1.0f / (4 * dotLH);
-            specularDirPDF = commonPDFTerm * ggx.evaluatePDF(dirV, m);
-
-            D = ggx.evaluate(m);
-        }
-        else {
-            uDir1 = (sumWeights * uComponent - diffuseWeight) / specularWeight;
-
-            // JP: スペキュラー層のマイクロファセット分布からサンプルする。
-            // EN: sample based on the specular microfacet distribution.
-            float mPDF;
-            D = ggx.sample(dirV, sample.uDir[0], uDir1, &m, &mPDF);
-            float dotVH = min(dot(dirV, m), 1.0f);
-            dotLH = dotVH;
-            dirL = Vector3D(2 * dotVH * m) - dirV;
-            if (dirL.z * dirV.z <= 0) {
-                result->dirPDensity = 0.0f;
-                return SampledSpectrum::Zero();
-            }
-            float commonPDFTerm = 1.0f / (4 * dotLH);
-            specularDirPDF = commonPDFTerm * mPDF;
-
-            // JP: 同じ方向サンプルをコサイン分布からサンプルする確率密度を求める。
-            // EN: calculate PDF to generate the sampled direction from the cosine distribution.
-            diffuseDirPDF = dirL.z / pi_v<float>;
-        }
-
-        float oneMinusDotLH5 = pow5(1 - dotLH);
-
-        float G;
-        if constexpr (USE_HEIGHT_CORRELATED_SMITH)
-            G = ggx.evaluateHeightCorrelatedSmithG(dirL, dirV, m);
-        else
-            G = ggx.evaluateSmithG1(dirL, m) * ggx.evaluateSmithG1(dirV, m);
-        constexpr float F90 = 1.0f;
-        SampledSpectrum F = lerp(m_specularF0Color, SampledSpectrum(F90), oneMinusDotLH5);
-
-        float microfacetDenom = 4 * dirL.z * dirV.z;
-        SampledSpectrum specularValue = F * ((D * G) / microfacetDenom);
-        if (G == 0)
-            specularValue = SampledSpectrum::Zero();
-
-        float F_D90 = 0.5f * m_roughness + 2 * m_roughness * dotLH * dotLH;
-        float oneMinusDotLN5 = pow5(1 - dirL.z);
-        float diffuseFresnelOut = lerp(1.0f, F_D90, oneMinusDotVN5);
-        float diffuseFresnelIn = lerp(1.0f, F_D90, oneMinusDotLN5);
-        SampledSpectrum diffuseValue = m_diffuseColor *
-            (diffuseFresnelOut * diffuseFresnelIn * lerp(1.0f, 1.0f / 1.51f, m_roughness) / pi_v<float>);
-
-        SampledSpectrum ret = diffuseValue + specularValue;
-
-        result->dirLocal = entering ? dirL : -dirL;
-
-        // PDF based on one-sample model MIS.
-        result->dirPDensity = (diffuseDirPDF * diffuseWeight + specularDirPDF * specularWeight) / sumWeights;
-
-        return ret;
-    }
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateF(const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        GGXMicrofacetDistribution ggx;
-        ggx.alpha_g = m_roughness * m_roughness;
-
-        if (vSampled.z * query.dirLocal.z <= 0)
-            return SampledSpectrum::Zero();
-
-        bool entering = query.dirLocal.z >= 0.0f;
-        Vector3D dirV = entering ? query.dirLocal : -query.dirLocal;
-        Vector3D dirL = entering ? vSampled : -vSampled;
-
-        Normal3D m = halfVector(dirL, dirV);
-        float dotLH = dot(dirL, m);
-
-        float oneMinusDotLH5 = pow5(1 - dotLH);
-
-        float D = ggx.evaluate(m);
-        float G;
-        if constexpr (USE_HEIGHT_CORRELATED_SMITH)
-            G = ggx.evaluateHeightCorrelatedSmithG(dirL, dirV, m);
-        else
-            G = ggx.evaluateSmithG1(dirL, m) * ggx.evaluateSmithG1(dirV, m);
-        constexpr float F90 = 1.0f;
-        SampledSpectrum F = lerp(m_specularF0Color, SampledSpectrum(F90), oneMinusDotLH5);
-
-        float microfacetDenom = 4 * dirL.z * dirV.z;
-        SampledSpectrum specularValue = F * ((D * G) / microfacetDenom);
-        if (G == 0)
-            specularValue = SampledSpectrum::Zero();
-
-        float F_D90 = 0.5f * m_roughness + 2 * m_roughness * dotLH * dotLH;
-        float oneMinusDotVN5 = pow5(1 - dirV.z);
-        float oneMinusDotLN5 = pow5(1 - dirL.z);
-        float diffuseFresnelOut = lerp(1.0f, F_D90, oneMinusDotVN5);
-        float diffuseFresnelIn = lerp(1.0f, F_D90, oneMinusDotLN5);
-
-        SampledSpectrum diffuseValue = m_diffuseColor *
-            (diffuseFresnelOut * diffuseFresnelIn * lerp(1.0f, 1.0f / 1.51f, m_roughness) / pi_v<float>);
-
-        SampledSpectrum ret = diffuseValue + specularValue;
-
-        return ret;
-    }
-    CUDA_DEVICE_FUNCTION float evaluatePDF(const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        GGXMicrofacetDistribution ggx;
-        ggx.alpha_g = m_roughness * m_roughness;
-
-        bool entering = query.dirLocal.z >= 0.0f;
-        Vector3D dirV = entering ? query.dirLocal : -query.dirLocal;
-        Vector3D dirL = entering ? vSampled : -vSampled;
-
-        Normal3D m = halfVector(dirL, dirV);
-        float dotLH = dot(dirL, m);
-        float commonPDFTerm = 1.0f / (4 * dotLH);
-
-        float diffuseWeight;
-        float specularWeight;
-        if constexpr (USE_FITTED_PRE_INTEGRATION_FOR_WEIGHTS) {
-            float diffusePreInt;
-            float specularPreIntA, specularPreIntB;
-            calcFittedPreIntegratedTerms(dirV.z, m_roughness, &diffusePreInt, &specularPreIntA, &specularPreIntB);
-
-            diffuseWeight = (m_diffuseColor * diffusePreInt).importance(query.wlHint);
-            specularWeight =
-                (m_specularF0Color * specularPreIntA +
-                 (SampledSpectrum::One() - m_specularF0Color) * specularPreIntB).importance(query.wlHint);
-        }
-        else {
-            float expectedF_D90 = 0.5f * m_roughness + 2 * m_roughness * query.dirLocal.z * query.dirLocal.z;
-            float oneMinusDotVN5 = pow5(1 - dirV.z);
-            float expectedDiffuseFresnel = lerp(1.0f, expectedF_D90, oneMinusDotVN5);
-            float iBaseColor = m_diffuseColor.importance(query.wlHint) * pow2(expectedDiffuseFresnel) *
-                lerp(1.0f, 1.0f / 1.51f, m_roughness);
-
-            float expectedOneMinusDotVH5 = pow5(1 - dirV.z);
-            float iSpecularF0 = m_specularF0Color.importance(query.wlHint);
-
-            diffuseWeight = iBaseColor;
-            specularWeight = lerp(iSpecularF0, 1.0f, expectedOneMinusDotVH5);
-        }
-        float sumWeights = diffuseWeight + specularWeight;
-        if (sumWeights == 0.0f)
-            return 0.0f;
-
-        float diffuseDirPDF = dirL.z / pi_v<float>;
-        float specularDirPDF = commonPDFTerm * ggx.evaluatePDF(dirV, m);
-
-        float ret = (diffuseDirPDF * diffuseWeight + specularDirPDF * specularWeight) / sumWeights;
-
-        return ret;
-    }
-
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateDHReflectanceEstimate(const shared::BSDFQuery &query) const {
-        bool entering = query.dirLocal.z >= 0.0f;
-        Vector3D dirV = entering ? query.dirLocal : -query.dirLocal;
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDHReflectanceEstimate(
+        const shared::BSDFQuery &query) const
+    {
+        const bool entering = query.dirLocal.z >= 0.0f;
+        const Vector3D dirV = entering ? query.dirLocal : -query.dirLocal;
 
         SampledSpectrum diffuseDHR;
         SampledSpectrum specularDHR;
@@ -2008,30 +1924,310 @@ public:
                 (SampledSpectrum::One() - m_specularF0Color) * specularPreIntB;
         }
         else {
-            float expectedCosTheta_d = dirV.z;
-            float expectedF_D90 = 0.5f * m_roughness + 2 * m_roughness * pow2(expectedCosTheta_d);
-            float oneMinusDotVN5 = pow5(1 - dirV.z);
-            float expectedDiffFGiven = lerp(1.0f, expectedF_D90, oneMinusDotVN5);
-            float expectedDiffFSampled = 1.0f; // ad-hoc
+            const float expectedCosTheta_d = dirV.z;
+            const float expectedF_D90 = 0.5f * m_roughness + 2 * m_roughness * pow2(expectedCosTheta_d);
+            const float oneMinusDotVN5 = pow5(1 - dirV.z);
+            const float expectedDiffFGiven = lerp(1.0f, expectedF_D90, oneMinusDotVN5);
+            const float expectedDiffFSampled = 1.0f; // ad-hoc
             diffuseDHR = m_diffuseColor *
                 expectedDiffFGiven * expectedDiffFSampled * lerp(1.0f, 1.0f / 1.51f, m_roughness);
 
             //float expectedOneMinusDotVH5 = oneMinusDotVN5;
             // (1 - m_roughness) is an ad-hoc adjustment.
-            float expectedOneMinusDotVH5 = pow5(1 - dirV.z) * (1 - m_roughness);
+            const float expectedOneMinusDotVH5 = pow5(1 - dirV.z) * (1 - m_roughness);
 
             specularDHR = lerp(m_specularF0Color, SampledSpectrum(1.0f), expectedOneMinusDotVH5);
         }
 
         return min(diffuseDHR + specularDHR, SampledSpectrum::One());
     }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
+        using namespace shared;
+        constexpr DirectionType type =
+            DirectionType::Reflection() | DirectionType::LowFreq() | DirectionType::HighFreq();
+        return type.matches(dirType);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
+        const shared::BSDFQuery &query, const shared::BSDFSample &sample,
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult = nullptr) const
+    {
+        if (revResult)
+            revResult->dirPDensity = 0.0f;
+
+        GGXMicrofacetDistribution ggx;
+        ggx.alpha_g = m_roughness * m_roughness;
+
+        const bool entering = query.dirLocal.z >= 0.0f;
+        Vector3D dirL;
+        const Vector3D dirV = entering ? query.dirLocal : -query.dirLocal;
+
+        const float oneMinusDotVN5 = pow5(1 - dirV.z);
+
+        float diffuseWeight;
+        float specularWeight;
+        if constexpr (USE_FITTED_PRE_INTEGRATION_FOR_WEIGHTS) {
+            float diffusePreInt;
+            float specularPreIntA, specularPreIntB;
+            calcFittedPreIntegratedTerms(dirV.z, m_roughness, &diffusePreInt, &specularPreIntA, &specularPreIntB);
+
+            diffuseWeight = (m_diffuseColor * diffusePreInt).importance(query.wlHint);
+            specularWeight =
+                (m_specularF0Color * specularPreIntA +
+                 (SampledSpectrum::One() - m_specularF0Color) * specularPreIntB).importance(query.wlHint);
+        }
+        else {
+            const float expectedF_D90 = 0.5f * m_roughness + 2 * m_roughness * query.dirLocal.z * query.dirLocal.z;
+            const float expectedDiffuseFresnel = lerp(1.0f, expectedF_D90, oneMinusDotVN5);
+            const float iBaseColor = m_diffuseColor.importance(query.wlHint) * pow2(expectedDiffuseFresnel) *
+                lerp(1.0f, 1.0f / 1.51f, m_roughness);
+
+            const float expectedOneMinusDotVH5 = pow5(1 - dirV.z);
+            const float iSpecularF0 = m_specularF0Color.importance(query.wlHint);
+
+            diffuseWeight = iBaseColor;
+            specularWeight = lerp(iSpecularF0, 1.0f, expectedOneMinusDotVH5);
+        }
+        const float sumWeights = diffuseWeight + specularWeight;
+        if (sumWeights == 0.0f) {
+            result->dirPDensity = 0.0f;
+            return SampledSpectrum::Zero();
+        }
+
+        float uDir1;
+        float compProb;
+        const uint32_t compIdx = rtc10::shared::sampleDiscrete(
+            sample.uDir[1], &compProb, &uDir1, diffuseWeight, specularWeight);
+
+        float diffuseDirPDens, specularDirPDens;
+        Normal3D m;
+        float dotLH;
+        float D;
+        if (compIdx == 0) {
+            // JP: コサイン分布からサンプルする。
+            // EN: sample based on cosine distribution.
+            dirL = cosineSampleHemisphere(sample.uDir[0], uDir1);
+            diffuseDirPDens = dirL.z / pi_v<float>;
+
+            // JP: 同じ方向サンプルをスペキュラー層からサンプルする確率密度を求める。
+            // EN: calculate PDF to generate the sampled direction from the specular layer.
+            m = halfVector(dirL, dirV);
+            dotLH = min(dot(dirL, m), 1.0f);
+            const float commonPDFTerm = 1.0f / (4 * dotLH);
+            specularDirPDens = commonPDFTerm * ggx.evaluatePDF(dirV, m);
+
+            D = ggx.evaluate(m);
+        }
+        else {
+            // JP: スペキュラー層のマイクロファセット分布からサンプルする。
+            // EN: sample based on the specular microfacet distribution.
+            float mPDF;
+            D = ggx.sample(dirV, sample.uDir[0], uDir1, &m, &mPDF);
+            const float dotVH = min(dot(dirV, m), 1.0f);
+            dotLH = dotVH;
+            dirL = Vector3D(2 * dotVH * m) - dirV;
+            if (dirL.z * dirV.z <= 0) {
+                result->dirPDensity = 0.0f;
+                return SampledSpectrum::Zero();
+            }
+            const float commonPDFTerm = 1.0f / (4 * dotLH);
+            specularDirPDens = commonPDFTerm * mPDF;
+
+            // JP: 同じ方向サンプルをコサイン分布からサンプルする確率密度を求める。
+            // EN: calculate PDF to generate the sampled direction from the cosine distribution.
+            diffuseDirPDens = dirL.z / pi_v<float>;
+        }
+
+        const float oneMinusDotLH5 = pow5(1 - dotLH);
+
+        float G;
+        if constexpr (USE_HEIGHT_CORRELATED_SMITH)
+            G = ggx.evaluateHeightCorrelatedSmithG(dirL, dirV, m);
+        else
+            G = ggx.evaluateSmithG1(dirL, m) * ggx.evaluateSmithG1(dirV, m);
+        constexpr float F90 = 1.0f;
+        const SampledSpectrum F = lerp(m_specularF0Color, SampledSpectrum(F90), oneMinusDotLH5);
+
+        const float microfacetDenom = 4 * dirL.z * dirV.z;
+        SampledSpectrum specularValue = F * ((D * G) / microfacetDenom);
+        if (G == 0)
+            specularValue = SampledSpectrum::Zero();
+
+        const float F_D90 = 0.5f * m_roughness + 2 * m_roughness * dotLH * dotLH;
+        const float oneMinusDotLN5 = pow5(1 - dirL.z);
+        const float diffuseFresnelOut = lerp(1.0f, F_D90, oneMinusDotVN5);
+        const float diffuseFresnelIn = lerp(1.0f, F_D90, oneMinusDotLN5);
+        const SampledSpectrum diffuseValue = m_diffuseColor *
+            (diffuseFresnelOut * diffuseFresnelIn * lerp(1.0f, 1.0f / 1.51f, m_roughness) / pi_v<float>);
+
+        const SampledSpectrum ret = diffuseValue + specularValue;
+
+        result->dirLocal = entering ? dirL : -dirL;
+
+        // PDF based on one-sample model MIS.
+        result->dirPDensity = (diffuseDirPDens * diffuseWeight + specularDirPDens * specularWeight) / sumWeights;
+
+        if (revResult) {
+            const float revDiffuseDirPDens = dirV.z / pi_v<float>;
+            const float commonPDFTerm = 1.0f / (4 * dotLH);
+            const float revSpecularDirPDens = commonPDFTerm * ggx.evaluatePDF(dirL, m);
+
+            const float revExpectedF_D90 = 0.5f * m_roughness + 2 * m_roughness * pow2(dirL.z);
+            const float revOneMinusDotVN5 = pow5(1 - dirL.z);
+            const float revExpectedDiffuseFresnel = lerp(1.0f, revExpectedF_D90, revOneMinusDotVN5);
+            const float revIBaseColor = m_diffuseColor.importance(query.wlHint) * pow2(revExpectedDiffuseFresnel) * lerp(1.0f, 1.0f / 1.51f, m_roughness);
+
+            const float revExpectedOneMinusDotVH5 = pow5(1 - dirL.z);
+            const float revISpecularF0 = m_specularF0Color.importance(query.wlHint);
+
+            const float revDiffuseWeight = revIBaseColor;
+            const float revSpecularWeight = lerp(revISpecularF0, 1.0f, revExpectedOneMinusDotVH5);
+
+            revResult->fsValue = ret;
+            revResult->dirPDensity =
+                (revDiffuseDirPDens * revDiffuseWeight + revSpecularDirPDens * revSpecularWeight) /
+                (revDiffuseWeight + revSpecularWeight);
+        }
+
+        return ret;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        SampledSpectrum* revValue = nullptr) const
+    {
+        if (revValue)
+            *revValue = SampledSpectrum::Zero();
+
+        GGXMicrofacetDistribution ggx;
+        ggx.alpha_g = m_roughness * m_roughness;
+
+        if (vSampled.z * query.dirLocal.z <= 0)
+            return SampledSpectrum::Zero();
+
+        const bool entering = query.dirLocal.z >= 0.0f;
+        const Vector3D dirV = entering ? query.dirLocal : -query.dirLocal;
+        const Vector3D dirL = entering ? vSampled : -vSampled;
+
+        const Normal3D m = halfVector(dirL, dirV);
+        const float dotLH = dot(dirL, m);
+
+        const float oneMinusDotLH5 = pow5(1 - dotLH);
+
+        const float D = ggx.evaluate(m);
+        float G;
+        if constexpr (USE_HEIGHT_CORRELATED_SMITH)
+            G = ggx.evaluateHeightCorrelatedSmithG(dirL, dirV, m);
+        else
+            G = ggx.evaluateSmithG1(dirL, m) * ggx.evaluateSmithG1(dirV, m);
+        constexpr float F90 = 1.0f;
+        const SampledSpectrum F = lerp(m_specularF0Color, SampledSpectrum(F90), oneMinusDotLH5);
+
+        const float microfacetDenom = 4 * dirL.z * dirV.z;
+        SampledSpectrum specularValue = F * ((D * G) / microfacetDenom);
+        if (G == 0)
+            specularValue = SampledSpectrum::Zero();
+
+        const float F_D90 = 0.5f * m_roughness + 2 * m_roughness * dotLH * dotLH;
+        const float oneMinusDotVN5 = pow5(1 - dirV.z);
+        const float oneMinusDotLN5 = pow5(1 - dirL.z);
+        const float diffuseFresnelOut = lerp(1.0f, F_D90, oneMinusDotVN5);
+        const float diffuseFresnelIn = lerp(1.0f, F_D90, oneMinusDotLN5);
+
+        const SampledSpectrum diffuseValue = m_diffuseColor *
+            (diffuseFresnelOut * diffuseFresnelIn * lerp(1.0f, 1.0f / 1.51f, m_roughness) / pi_v<float>);
+
+        const SampledSpectrum ret = diffuseValue + specularValue;
+
+        if (revValue)
+            *revValue = ret;
+
+        return ret;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        float* revValue = nullptr) const
+    {
+        if (revValue)
+            *revValue = 0.0f;
+
+        GGXMicrofacetDistribution ggx;
+        ggx.alpha_g = m_roughness * m_roughness;
+
+        const bool entering = query.dirLocal.z >= 0.0f;
+        const Vector3D dirV = entering ? query.dirLocal : -query.dirLocal;
+        const Vector3D dirL = entering ? vSampled : -vSampled;
+
+        const Normal3D m = halfVector(dirL, dirV);
+        const float dotLH = dot(dirL, m);
+        const float commonPDFTerm = 1.0f / (4 * dotLH);
+
+        float diffuseWeight;
+        float specularWeight;
+        if constexpr (USE_FITTED_PRE_INTEGRATION_FOR_WEIGHTS) {
+            float diffusePreInt;
+            float specularPreIntA, specularPreIntB;
+            calcFittedPreIntegratedTerms(dirV.z, m_roughness, &diffusePreInt, &specularPreIntA, &specularPreIntB);
+
+            diffuseWeight = (m_diffuseColor * diffusePreInt).importance(query.wlHint);
+            specularWeight =
+                (m_specularF0Color * specularPreIntA +
+                 (SampledSpectrum::One() - m_specularF0Color) * specularPreIntB).importance(query.wlHint);
+        }
+        else {
+            const float expectedF_D90 = 0.5f * m_roughness + 2 * m_roughness * pow2(dirV.z);
+            const float oneMinusDotVN5 = pow5(1 - dirV.z);
+            const float expectedDiffuseFresnel = lerp(1.0f, expectedF_D90, oneMinusDotVN5);
+            const float iBaseColor = m_diffuseColor.importance(query.wlHint) * pow2(expectedDiffuseFresnel) *
+                lerp(1.0f, 1.0f / 1.51f, m_roughness);
+
+            const float expectedOneMinusDotVH5 = pow5(1 - dirV.z);
+            const float iSpecularF0 = m_specularF0Color.importance(query.wlHint);
+
+            diffuseWeight = iBaseColor;
+            specularWeight = lerp(iSpecularF0, 1.0f, expectedOneMinusDotVH5);
+        }
+        const float sumWeights = diffuseWeight + specularWeight;
+        if (sumWeights == 0.0f)
+            return 0.0f;
+
+        const float diffuseDirPDens = dirL.z / pi_v<float>;
+        const float specularDirPDens = commonPDFTerm * ggx.evaluatePDF(dirV, m);
+
+        const float ret = (diffuseDirPDens * diffuseWeight + specularDirPDens * specularWeight) / sumWeights;
+
+        if (revValue) {
+            const float revDiffuseDirPDens = dirV.z / pi_v<float>;
+            const float commonPDFTerm = 1.0f / (4 * dotLH);
+            const float revSpecularDirPDens = commonPDFTerm * ggx.evaluatePDF(dirL, m);
+
+            const float revExpectedF_D90 = 0.5f * m_roughness + 2 * m_roughness * pow2(dirL.z);
+            const float revOneMinusDotVN5 = pow5(1 - dirL.z);
+            const float revExpectedDiffuseFresnel = lerp(1.0f, revExpectedF_D90, revOneMinusDotVN5);
+            const float revIBaseColor = m_diffuseColor.importance(query.wlHint) *
+                pow2(revExpectedDiffuseFresnel) * lerp(1.0f, 1.0f / 1.51f, m_roughness);
+
+            const float revExpectedOneMinusDotVH5 = pow5(1 - dirL.z);
+            const float revISpecularF0 = m_specularF0Color.importance(query.wlHint);
+
+            const float revDiffuseWeight = revIBaseColor;
+            const float revSpecularWeight = lerp(revISpecularF0, 1.0f, revExpectedOneMinusDotVH5);
+
+            *revValue =
+                (revDiffuseDirPDens * revDiffuseWeight + revSpecularDirPDens * revSpecularWeight) /
+                (revDiffuseWeight + revSpecularWeight);
+        }
+
+        return ret;
+    }
 };
 
 class SimplePBR_BRDF : public DichromaticBRDF {
 public:
-    CUDA_DEVICE_FUNCTION SimplePBR_BRDF() {}
-    CUDA_DEVICE_FUNCTION SimplePBR_BRDF(
-        const SampledSpectrum &baseColor, float reflectance, float smoothness, float metallic) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SimplePBR_BRDF() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SimplePBR_BRDF(
+        const SampledSpectrum &baseColor, float reflectance, float smoothness, float metallic)
+    {
         m_diffuseColor = baseColor * (1 - metallic);
         m_specularF0Color = SampledSpectrum(0.16f * pow2(reflectance) * (1 - metallic)) + baseColor * metallic;
         m_roughness = 1 - smoothness;
@@ -2041,27 +2237,19 @@ public:
 template<>
 CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<DichromaticBRDF>(
     const shared::SurfaceMaterial &matData,
-    TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags flags) {
-    auto &mat = reinterpret_cast<const shared::DichromaticSurfaceMaterial &>(matData.body);
-    float4 diffuseColor = sample<float4>(
-        mat.diffuse,
-        mat.diffuseDimInfo,
-        texCoord);
-    float4 specularF0Color = sample<float4>(
-        mat.specular,
-        mat.specularDimInfo,
-        texCoord);
-    float smoothness = sample<float>(
-        mat.smoothness,
-        mat.smoothnessDimInfo,
-        texCoord);
-    //bool regularize = (flags & BSDFFlags::Regularize) != 0;
+    TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags flags)
+{
+    const auto &mat = reinterpret_cast<const shared::DichromaticSurfaceMaterial &>(matData.body);
+    const float4 diffuseColor = tex2DLod<float4>(mat.diffuse, texCoord.u, texCoord.v, 0.0f);
+    const float4 specularF0Color = tex2DLod<float4>(mat.specular, texCoord.u, texCoord.v, 0.0f);
+    const float smoothness = tex2DLod<float>(mat.smoothness, texCoord.u, texCoord.v, 0.0f);
+    //const bool regularize = (flags & BSDFFlags::Regularize) != 0;
     //if (regularize)
     //    smoothness *= 0.5f;
     auto &bsdfBody = *reinterpret_cast<DichromaticBRDF*>(bodyData);
-    auto spBaseColor = createTripletSpectrum(
+    const auto spBaseColor = createTripletSpectrum(
         SpectrumType::Reflectance, ColorSpace::Rec709_D65, diffuseColor.x, diffuseColor.y, diffuseColor.z);
-    auto spF0Color = createTripletSpectrum(
+    const auto spF0Color = createTripletSpectrum(
         SpectrumType::Reflectance, ColorSpace::Rec709_D65, specularF0Color.x, specularF0Color.y, specularF0Color.z);
     bsdfBody = DichromaticBRDF(spBaseColor.evaluate(wls), spF0Color.evaluate(wls), min(smoothness, 0.999f));
 }
@@ -2069,23 +2257,20 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<DichromaticBRDF>(
 template<>
 CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<SimplePBR_BRDF>(
     const shared::SurfaceMaterial &matData,
-    TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags flags) {
-    auto &mat = reinterpret_cast<const shared::SimplePBRSurfaceMaterial &>(matData.body);
-    float4 baseColor_opacity = sample<float4>(
-        mat.baseColor_opacity,
-        mat.baseColor_opacity_dimInfo,
-        texCoord);
-    float4 occlusion_roughness_metallic = sample<float4>(
-        mat.occlusion_roughness_metallic,
-        mat.occlusion_roughness_metallic_dimInfo,
-        texCoord);
-    float smoothness = min(1.0f - occlusion_roughness_metallic.y, 0.999f);
-    float metallic = occlusion_roughness_metallic.z;
-    //bool regularize = (flags & BSDFFlags::Regularize) != 0;
+    TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags flags)
+{
+    const auto &mat = reinterpret_cast<const shared::SimplePBRSurfaceMaterial &>(matData.body);
+    const float4 baseColor_opacity = tex2DLod<float4>(
+        mat.baseColor_opacity, texCoord.u, texCoord.v, 0.0f);
+    const float4 occlusion_roughness_metallic = tex2DLod<float4>(
+        mat.occlusion_roughness_metallic, texCoord.u, texCoord.v, 0.0f);
+    const float smoothness = min(1.0f - occlusion_roughness_metallic.y, 0.999f);
+    const float metallic = occlusion_roughness_metallic.z;
+    //const bool regularize = (flags & BSDFFlags::Regularize) != 0;
     //if (regularize)
     //    smoothness *= 0.5f;
     auto &bsdfBody = *reinterpret_cast<SimplePBR_BRDF*>(bodyData);
-    auto spBaseColor = createTripletSpectrum(
+    const auto spBaseColor = createTripletSpectrum(
         SpectrumType::Reflectance, ColorSpace::Rec709_D65,
         baseColor_opacity.x, baseColor_opacity.y, baseColor_opacity.z);
     bsdfBody = SimplePBR_BRDF(spBaseColor.evaluate(wls), 0.5f, smoothness, metallic);
@@ -2097,35 +2282,62 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<SimplePBR_BRDF>(
     RT_CALLABLE_PROGRAM void RT_DC_NAME(BSDFType ## _getSurfaceParameters)(\
         const uint32_t* data,\
         SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) {\
-        auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
+        const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.getSurfaceParameters(diffuseReflectance, specularReflectance, roughness);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _getSurfaceParameters);\
+    RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _evaluateDHReflectanceEstimate)(\
+        const uint32_t* data, const shared::BSDFQuery &query) {\
+        const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
+        return bsdf.evaluateDHReflectanceEstimate(query);\
+    }\
+    CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluateDHReflectanceEstimate);\
+    RT_CALLABLE_PROGRAM bool RT_DC_NAME(BSDFType ## _matches)(\
+        const uint32_t* data, shared::DirectionType dirType) {\
+        const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
+        return bsdf.matches(dirType);\
+    }\
+    CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _matches);\
     RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _sampleF)(\
         const uint32_t* data, const shared::BSDFQuery &query, const shared::BSDFSample &sample,\
         shared::BSDFQueryResult* result) {\
-        auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
+        const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.sampleF(query, sample, result);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _sampleF);\
+    RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _sampleFWithRev)(\
+        const uint32_t* data, const shared::BSDFQuery &query, const shared::BSDFSample &sample,\
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult) {\
+        const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
+        return bsdf.sampleF(query, sample, result, revResult);\
+    }\
+    CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _sampleFWithRev);\
     RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _evaluateF)(\
         const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled) {\
-        auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
+        const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.evaluateF(query, vSampled);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluateF);\
+    RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _evaluateFWithRev)(\
+        const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled,\
+        SampledSpectrum* revValue) {\
+        const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
+        return bsdf.evaluateF(query, vSampled, revValue);\
+    }\
+    CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluateFWithRev);\
     RT_CALLABLE_PROGRAM float RT_DC_NAME(BSDFType ## _evaluatePDF)(\
         const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled) {\
-        auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
+        const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.evaluatePDF(query, vSampled);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluatePDF);\
-    RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _evaluateDHReflectanceEstimate)(\
-        const uint32_t* data, const shared::BSDFQuery &query) {\
-        auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
-        return bsdf.evaluateDHReflectanceEstimate(query);\
+    RT_CALLABLE_PROGRAM float RT_DC_NAME(BSDFType ## _evaluatePDFWithRev)(\
+        const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled,\
+        float* revValue) {\
+        const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
+        return bsdf.evaluatePDF(query, vSampled, revValue);\
     }\
-    CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluateDHReflectanceEstimate);
+    CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluatePDFWithRev);
 
 DEFINE_BSDF_CALLABLES(LambertBRDF);
 DEFINE_BSDF_CALLABLES(DichromaticBRDF);
@@ -2150,20 +2362,45 @@ DEFINE_SETUP_BSDF_CALLABLE(SimplePBR_BRDF);
 
 class IsotropicPhaseFunction {
 public:
-    CUDA_DEVICE_FUNCTION IsotropicPhaseFunction() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE IsotropicPhaseFunction() {}
 
-    CUDA_DEVICE_FUNCTION SampledSpectrum sampleF(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
+        using namespace shared;
+        constexpr DirectionType type =
+            DirectionType::WholeSphere() | DirectionType::LowFreq();
+        return type.matches(dirType);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
         const shared::BSDFQuery &query, const shared::BSDFSample &sample,
-        shared::BSDFQueryResult* result) const {
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult = nullptr) const
+    {
         result->dirLocal = uniformSampleSphere(sample.uDir[0], sample.uDir[1]);
         result->dirPDensity = 1.0f / (4 * pi_v<float>);
-        return SampledSpectrum(1.0f / (4 * pi_v<float>));
+        const SampledSpectrum fpValue = SampledSpectrum(1.0f / (4 * pi_v<float>));
+        if (revResult) {
+            revResult->fsValue = fpValue;
+            revResult->dirPDensity = result->dirPDensity;
+        }
+        return fpValue;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateF(const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        return SampledSpectrum(1.0f / (4 * pi_v<float>));
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        SampledSpectrum* revValue = nullptr) const
+    {
+        const SampledSpectrum fpValue = SampledSpectrum(1.0f / (4 * pi_v<float>));
+        if (revValue)
+            *revValue = fpValue;
+        return fpValue;
     }
-    CUDA_DEVICE_FUNCTION float evaluatePDF(const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        return 1.0f / (4 * pi_v<float>);
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        float* revValue = nullptr) const
+    {
+        const float dirPDens = 1.0f / (4 * pi_v<float>);
+        if (revValue)
+            *revValue = dirPDens;
+        return dirPDens;
     }
 };
 
@@ -2173,79 +2410,185 @@ class SchlickPhaseFunction {
     float m_k;
 
 public:
-    CUDA_DEVICE_FUNCTION SchlickPhaseFunction(float k) : m_k(k) {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SchlickPhaseFunction(float k) : m_k(k) {}
 
-    CUDA_DEVICE_FUNCTION SampledSpectrum sampleF(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
+        using namespace shared;
+        constexpr DirectionType type =
+            DirectionType::WholeSphere() | DirectionType::LowFreq();
+        return type.matches(dirType);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
         const shared::BSDFQuery &query, const shared::BSDFSample &sample,
-        shared::BSDFQueryResult* result) const {
-        float cosTheta = clamp(
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult = nullptr) const
+    {
+        const float cosTheta = clamp(
             (2 * sample.uDir[1] + m_k - 1) / (2 * m_k * sample.uDir[1] - m_k + 1),
             -1.0f, 1.0f);
-        float phi = 2 * pi_v<float> * sample.uDir[0];
+        const float phi = 2 * pi_v<float> * sample.uDir[0];
 
-        float dTerm = (1 - m_k * cosTheta);
-        float value = (1 - pow2(m_k)) / (4 * pi_v<float> * pow2(dTerm));
-        float sinTheta = std::sqrt(1 - pow2(cosTheta));
-        result->dirLocal = Vector3D(std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, -cosTheta);
+        const float dTerm = (1 - m_k * cosTheta);
+        const float value = (1 - pow2(m_k)) / (4 * pi_v<float> * pow2(dTerm));
+        const float sinTheta = std::sqrt(1 - pow2(cosTheta));
+        result->dirLocal = Vector3D(std::cos(phi) * sinTheta, std::sin(phi) * sinTheta, cosTheta);
         result->dirPDensity = value;
-
-        return SampledSpectrum(value);
+        const SampledSpectrum fpValue = SampledSpectrum(value);
+        if (revResult) {
+            revResult->fsValue = fpValue;
+            revResult->dirPDensity = value;
+        }
+        return fpValue;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateF(const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        float cosTheta = -vSampled.z;
-        float dTerm = (1 - m_k * cosTheta);
-        float value = (1 - pow2(m_k)) / (4 * pi_v<float> * pow2(dTerm));
-        return SampledSpectrum(value);
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        SampledSpectrum* revValue = nullptr) const
+    {
+        const float cosTheta = vSampled.z;
+        const float dTerm = (1 - m_k * cosTheta);
+        const float value = (1 - pow2(m_k)) / (4 * pi_v<float> * pow2(dTerm));
+        const SampledSpectrum fpValue = SampledSpectrum(value);
+        if (revValue)
+            *revValue = fpValue;
+        return fpValue;
     }
-    CUDA_DEVICE_FUNCTION float evaluatePDF(const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        float cosTheta = -vSampled.z;
-        float dTerm = (1 - m_k * cosTheta);
-        float ret = (1 - pow2(m_k)) / (4 * pi_v<float> * pow2(dTerm));
-        return ret;
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        float* revValue = nullptr) const
+    {
+        const float cosTheta = vSampled.z;
+        const float dTerm = (1 - m_k * cosTheta);
+        const float dirPDens = (1 - pow2(m_k)) / (4 * pi_v<float> * pow2(dTerm));
+        if (revValue)
+            *revValue = dirPDens;
+        return dirPDens;
     }
 };
 
 
 
-template <bool isGeneric>
+class DiffuseEDF {
+public:
+    CUDA_DEVICE_FUNCTION CUDA_INLINE DiffuseEDF() {}
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
+        using namespace shared;
+        constexpr DirectionType type =
+            DirectionType::Emission() | DirectionType::LowFreq();
+        return type.matches(dirType);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
+        const shared::EDFQuery &query, const shared::EDFSample &sample,
+        shared::EDFQueryResult* result) const
+    {
+        result->dirLocal = cosineSampleHemisphere(sample.uDir[0], sample.uDir[1]);
+        const float oneOverPi = 1.0f / pi_v<float>;
+        result->dirPDensity = result->dirLocal.z * oneOverPi;
+        const SampledSpectrum feValue = oneOverPi;
+        return feValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::EDFQuery &query, const Vector3D &vSampled) const
+    {
+        if (vSampled.z <= 0.0f) {
+            const SampledSpectrum fs = SampledSpectrum::Zero();
+            return fs;
+        }
+        const float oneOverPi = 1.0f / pi_v<float>;
+        const SampledSpectrum fsValue = oneOverPi;
+        return fsValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::EDFQuery &query, const Vector3D &vSampled) const
+    {
+        if (vSampled.z <= 0.0f) {
+            return 0.0f;
+        }
+        const float oneOverPi = 1.0f / pi_v<float>;
+        const float dirPDens = std::fabs(vSampled.z) * oneOverPi;
+        return dirPDens;
+    }
+};
+
+
+
+enum class BSDFGrade {
+    Unidirectional = 0,
+    Bidirectional,
+};
+
+
+
+template <BSDFGrade bsdfGrade, bool isGeneric>
 class BSDFTemplate;
 
-template <>
-class BSDFTemplate<false> {
+template <BSDFGrade bsdfGrade>
+class BSDFTemplate<bsdfGrade, false> {
     union {
         HARD_CODED_BSDF m_bsdf;
         struct {
-            IsotropicPhaseFunction m_pf;
-            //SchlickPhaseFunction m_pf;
-            SampledSpectrum m_scatteringAlbedo;
-        };
+            IsotropicPhaseFunction pf;
+            //SchlickPhaseFunction pf;
+            SampledSpectrum scatteringAlbedo;
+        } m_m;
+        struct {
+            uint32_t isDirectionalEdf : 1;
+        } m_e;
     };
     uint32_t m_inMedium : 1;
+    uint32_t m_isEdf : 1;
 
 public:
-    CUDA_DEVICE_FUNCTION BSDFTemplate() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFTemplate() {}
 
-    CUDA_DEVICE_FUNCTION void setup(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
         const shared::SurfaceMaterial &matData, const TexCoord2D &texCoord, const WavelengthSamples &wls,
-        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None) {
-        setupBSDFBody<HARD_CODED_BSDF>(matData, texCoord, wls, reinterpret_cast<uint32_t*>(&m_bsdf), flags);
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
+        using namespace shared;
+        const bool isEdf = flags & BSDFBuildFlags::FromEDF;
+        if (isEdf) {
+            m_e.isDirectionalEdf = EmitterType(matData.emitterType) == EmitterType::Directional;
+        }
+        else {
+            setupBSDFBody<HARD_CODED_BSDF>(matData, texCoord, wls, reinterpret_cast<uint32_t*>(&m_bsdf), flags);
+        }
         m_inMedium = false;
+        m_isEdf = isEdf;
     }
-    CUDA_DEVICE_FUNCTION void setup(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
         const SampledSpectrum &scatteringAlbedo,
-        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None) {
-        m_scatteringAlbedo = scatteringAlbedo;
-        //m_pf = SchlickPhaseFunction(0.0f);
-        m_pf = IsotropicPhaseFunction();
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
+        m_m.scatteringAlbedo = scatteringAlbedo;
+        //m_m.pf = SchlickPhaseFunction(0.0f);
+        m_m.pf = IsotropicPhaseFunction();
         m_inMedium = true;
+        m_isEdf = false;
     }
-    CUDA_DEVICE_FUNCTION bool isInMedium() const {
-        return m_inMedium;
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
+        using namespace shared;
+        if (m_isEdf) {
+            const DirectionType type = DirectionType::Emission() |
+                (m_e.isDirectionalEdf ? DirectionType::Delta0D() : DirectionType::LowFreq());
+            return type.matches(dirType);
+        }
+        else if (m_inMedium) {
+            return m_m.pf.matches(dirType);
+        }
+        else {
+            return m_bsdf.matches(dirType);
+        }
     }
-    CUDA_DEVICE_FUNCTION void getSurfaceParameters(
-        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const {
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void getSurfaceParameters(
+        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const
+    {
+        Assert(!m_isEdf, "EDF does not assume this function is called.");
         if (m_inMedium) {
-            *diffuseReflectance = m_scatteringAlbedo;
+            *diffuseReflectance = m_m.scatteringAlbedo;
             *specularReflectance = SampledSpectrum::Zero();
             *roughness = 0.0f;
             return;
@@ -2253,52 +2596,82 @@ public:
 
         return m_bsdf.getSurfaceParameters(diffuseReflectance, specularReflectance, roughness);
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrum sampleF(
-        const shared::BSDFQuery &query, const shared::BSDFSample &smp,
-        shared::BSDFQueryResult* result) const {
-        SampledSpectrum fsValue;
-        if (m_inMedium)
-            fsValue = m_scatteringAlbedo * m_pf.sampleF(query, smp, result);
-        else
-            fsValue = m_bsdf.sampleF(query, smp, result);
-        return fsValue;
-    }
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateF(
-        const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        SampledSpectrum fsValue;
-        if (m_inMedium)
-            fsValue = m_scatteringAlbedo * m_pf.evaluateF(query, vSampled);
-        else
-            fsValue = m_bsdf.evaluateF(query, vSampled);
-        return fsValue;
-    }
-    CUDA_DEVICE_FUNCTION float evaluatePDF(
-        const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        float dirPDensity;
-        if (m_inMedium)
-            dirPDensity = m_pf.evaluatePDF(query, vSampled);
-        else
-            dirPDensity = m_bsdf.evaluatePDF(query, vSampled);
-        return dirPDensity;
-    }
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateDHReflectanceEstimate(const shared::BSDFQuery &query) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDHReflectanceEstimate(
+        const shared::BSDFQuery &query) const
+    {
+        Assert(!m_isEdf, "EDF does not assume this function is called.");
         if (m_inMedium)
             return SampledSpectrum::Zero();
         else
             return m_bsdf.evaluateDHReflectanceEstimate(query);
     }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
+        const shared::BSDFQuery &query, const shared::BSDFSample &smp,
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult = nullptr) const
+    {
+        Assert(!m_isEdf, "EDF does not assume this function is called.");
+        SampledSpectrum fsValue;
+        if (m_inMedium)
+            fsValue = m_m.scatteringAlbedo * m_m.pf.sampleF(query, smp, result, revResult);
+        else
+            fsValue = m_bsdf.sampleF(query, smp, result, revResult);
+        return fsValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        SampledSpectrum* revValue = nullptr) const
+    {
+        SampledSpectrum fsValue;
+        if (m_isEdf) {
+            if (m_e.isDirectionalEdf)
+                fsValue = SampledSpectrum::Zero();
+            else
+                fsValue = vSampled.z > 0.0f ? 1.0f / pi_v<float> : 0.0f;
+        }
+        else if (m_inMedium) {
+            fsValue = m_m.scatteringAlbedo * m_m.pf.evaluateF(query, vSampled, revValue);
+        }
+        else {
+            fsValue = m_bsdf.evaluateF(query, vSampled);
+        }
+        return fsValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        float* revValue = nullptr) const
+    {
+        float dirPDensity;
+        if (m_isEdf) {
+            if (m_e.isDirectionalEdf)
+                dirPDensity = 0.0f;
+            else
+                dirPDensity = vSampled.z > 0.0f ? vSampled.z / pi_v<float> : 0.0f;
+        }
+        else if (m_inMedium) {
+            dirPDensity = m_m.pf.evaluatePDF(query, vSampled, revValue);
+        }
+        else {
+            dirPDensity = m_bsdf.evaluatePDF(query, vSampled, revValue);
+        }
+        return dirPDensity;
+    }
+
+    CUDA_DEVICE_FUNCTION bool isInMedium() const {
+        return m_inMedium;
+    }
 };
 
 template <>
-class BSDFTemplate<true> {
+class BSDFTemplate<BSDFGrade::Unidirectional, true> {
     union {
         struct {
             static constexpr uint32_t NumDwords = 16;
             shared::BSDFGetSurfaceParameters getSurfaceParameters;
+            shared::BSDFEvaluateDHReflectanceEstimate evaluateDHReflectanceEstimate;
+            shared::BSDFMatches matches;
             shared::BSDFSampleF sampleF;
             shared::BSDFEvaluateF evaluateF;
             shared::BSDFEvaluatePDF evaluatePDF;
-            shared::BSDFEvaluateDHReflectanceEstimate evaluateDHReflectanceEstimate;
             uint32_t data[NumDwords];
         } m_s;
         struct {
@@ -2310,33 +2683,39 @@ class BSDFTemplate<true> {
     uint32_t m_inMedium : 1;
 
 public:
-    CUDA_DEVICE_FUNCTION BSDFTemplate() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFTemplate() {}
 
-    CUDA_DEVICE_FUNCTION void setup(
-        const shared::SurfaceMaterial &matData, const TexCoord2D &texCoord,
-        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
+        const shared::SurfaceMaterial &matData, const TexCoord2D &texCoord, const WavelengthSamples &wls,
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
+        using namespace shared;
+        Assert(
+            flags & BSDFBuildFlags::FromEDF == 0,
+            "Unidirectional-grade BSDF does not support construction from EDF.");
         matData.setupBSDFBody(matData, texCoord, m_s.data, flags);
         const shared::BSDFProcedureSet &procSet = getBSDFProcedureSet(matData.bsdfProcSetSlot);
         m_s.getSurfaceParameters = procSet.getSurfaceParameters;
+        m_s.evaluateDHReflectanceEstimate = procSet.evaluateDHReflectanceEstimate;
+        m_s.matches = procSet.matches;
         m_s.sampleF = procSet.sampleF;
         m_s.evaluateF = procSet.evaluateF;
         m_s.evaluatePDF = procSet.evaluatePDF;
-        m_s.evaluateDHReflectanceEstimate = procSet.evaluateDHReflectanceEstimate;
         m_inMedium = false;
     }
-    CUDA_DEVICE_FUNCTION void setup(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
         const SampledSpectrum scatteringAlbedo,
-        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None) {
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
         m_m.scatteringAlbedo = scatteringAlbedo;
         //m_m.pf = SchlickPhaseFunction(1.0f);
         m_m.pf = IsotropicPhaseFunction();
         m_inMedium = true;
     }
-    CUDA_DEVICE_FUNCTION bool isInMedium() const {
-        return m_inMedium;
-    }
-    CUDA_DEVICE_FUNCTION void getSurfaceParameters(
-        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const {
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void getSurfaceParameters(
+        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const
+    {
         if (m_inMedium) {
             *diffuseReflectance = m_m.scatteringAlbedo;
             *specularReflectance = SampledSpectrum::Zero();
@@ -2346,9 +2725,26 @@ public:
 
         return m_s.getSurfaceParameters(m_s.data, diffuseReflectance, specularReflectance, roughness);
     }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDHReflectanceEstimate(
+        const shared::BSDFQuery &query) const
+    {
+        if (m_inMedium)
+            return SampledSpectrum::Zero();
+        else
+            return m_s.evaluateDHReflectanceEstimate(m_s.data, query);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
+        if (m_inMedium)
+            return m_m.pf.matches(dirType);
+        else
+            return m_s.matches(m_s.data, dirType);
+    }
+
     CUDA_DEVICE_FUNCTION SampledSpectrum sampleF(
         const shared::BSDFQuery &query, const shared::BSDFSample &smp,
-        shared::BSDFQueryResult* result) const {
+        shared::BSDFQueryResult* result) const
+    {
         SampledSpectrum fsValue;
         if (m_inMedium)
             fsValue = m_m.scatteringAlbedo * m_m.pf.sampleF(query, smp, result);
@@ -2357,7 +2753,8 @@ public:
         return fsValue;
     }
     CUDA_DEVICE_FUNCTION SampledSpectrum evaluateF(
-        const shared::BSDFQuery &query, const Vector3D &vSampled) const {
+        const shared::BSDFQuery &query, const Vector3D &vSampled) const
+    {
         SampledSpectrum fsValue;
         if (m_inMedium)
             fsValue = m_m.scatteringAlbedo * m_m.pf.evaluateF(query, vSampled);
@@ -2366,7 +2763,8 @@ public:
         return fsValue;
     }
     CUDA_DEVICE_FUNCTION float evaluatePDF(
-        const shared::BSDFQuery &query, const Vector3D &vSampled) const {
+        const shared::BSDFQuery &query, const Vector3D &vSampled) const
+    {
         float dirPDensity;
         if (m_inMedium)
             dirPDensity = m_m.pf.evaluatePDF(query, vSampled);
@@ -2374,46 +2772,218 @@ public:
             dirPDensity = m_s.evaluatePDF(m_s.data, query, vSampled);
         return dirPDensity;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateDHReflectanceEstimate(const shared::BSDFQuery &query) const {
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isInMedium() const {
+        return m_inMedium;
+    }
+};
+
+template <>
+class BSDFTemplate<BSDFGrade::Bidirectional, true> {
+    union {
+        struct {
+            static constexpr uint32_t NumDwords = 16;
+            shared::BSDFGetSurfaceParameters getSurfaceParameters;
+            shared::BSDFEvaluateDHReflectanceEstimate evaluateDHReflectanceEstimate;
+            shared::BSDFMatches matches;
+            shared::BSDFSampleFWithRev sampleFWithRev;
+            shared::BSDFEvaluateFWithRev evaluateFWithRev;
+            shared::BSDFEvaluatePDFWithRev evaluatePDFWithRev;
+            uint32_t data[NumDwords];
+        } m_s;
+        struct {
+            //SchlickPhaseFunction pf;
+            IsotropicPhaseFunction pf;
+            SampledSpectrum scatteringAlbedo;
+        } m_m;
+        struct {
+            uint32_t isDirectionalEdf : 1;
+        } m_e;
+    };
+    uint32_t m_inMedium : 1;
+    uint32_t m_isEdf : 1;
+
+public:
+    CUDA_DEVICE_FUNCTION CUDA_INLINE BSDFTemplate() {}
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
+        const shared::SurfaceMaterial &matData, const TexCoord2D &texCoord, const WavelengthSamples &wls,
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
+        using namespace shared;
+        const bool isEdf = flags & BSDFBuildFlags::FromEDF;
+        if (isEdf) {
+            m_e.isDirectionalEdf = EmitterType(matData.emitterType) == EmitterType::Directional;
+        }
+        else {
+            matData.setupBSDFBody(matData, texCoord, m_s.data, flags);
+            const shared::BSDFProcedureSet &procSet = getBSDFProcedureSet(matData.bsdfProcSetSlot);
+            m_s.getSurfaceParameters = procSet.getSurfaceParameters;
+            m_s.evaluateDHReflectanceEstimate = procSet.evaluateDHReflectanceEstimate;
+            m_s.matches = procSet.matches;
+            m_s.sampleFWithRev = procSet.sampleFWithRev;
+            m_s.evaluateFWithRev = procSet.evaluateFWithRev;
+            m_s.evaluatePDFWithRev = procSet.evaluatePDFWithRev;
+        }
+        m_inMedium = false;
+        m_isEdf = isEdf;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
+        const SampledSpectrum scatteringAlbedo,
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
+        m_m.scatteringAlbedo = scatteringAlbedo;
+        //m_m.pf = SchlickPhaseFunction(1.0f);
+        m_m.pf = IsotropicPhaseFunction();
+        m_inMedium = true;
+        m_isEdf = false;
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
+        using namespace shared;
+        if (m_isEdf) {
+            const DirectionType type = DirectionType::Emission() |
+                (m_e.isDirectionalEdf ? DirectionType::Delta0D() : DirectionType::LowFreq());
+            return type.matches(dirType);
+        }
+        else if (m_inMedium)
+            return m_m.pf.matches(dirType);
+        else
+            return m_s.matches(m_s.data, dirType);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void getSurfaceParameters(
+        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const
+    {
+        Assert(!m_isEdf, "EDF does not assume this function is called.");
+        if (m_inMedium) {
+            *diffuseReflectance = m_m.scatteringAlbedo;
+            *specularReflectance = SampledSpectrum::Zero();
+            *roughness = 0.0f;
+            return;
+        }
+
+        return m_s.getSurfaceParameters(m_s.data, diffuseReflectance, specularReflectance, roughness);
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDHReflectanceEstimate(
+        const shared::BSDFQuery &query) const
+    {
+        Assert(!m_isEdf, "EDF does not assume this function is called.");
         if (m_inMedium)
             return SampledSpectrum::Zero();
         else
             return m_s.evaluateDHReflectanceEstimate(m_s.data, query);
     }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
+        const shared::BSDFQuery &query, const shared::BSDFSample &smp,
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult) const
+    {
+        Assert(!m_isEdf, "EDF does not assume this function is called.");
+        SampledSpectrum fsValue;
+        if (m_inMedium)
+            fsValue = m_m.scatteringAlbedo * m_m.pf.sampleF(query, smp, result, revResult);
+        else
+            fsValue = m_s.sampleFWithRev(m_s.data, query, smp, result, revResult);
+        return fsValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        SampledSpectrum* revValue) const
+    {
+        SampledSpectrum fsValue;
+        if (m_isEdf) {
+            if (m_e.isDirectionalEdf)
+                fsValue = SampledSpectrum::Zero();
+            else
+                fsValue = vSampled.z > 0.0f ? 1.0f / pi_v<float> : 0.0f;
+        }
+        else if (m_inMedium) {
+            fsValue = m_m.scatteringAlbedo * m_m.pf.evaluateF(query, vSampled, revValue);
+        }
+        else {
+            fsValue = m_s.evaluateFWithRev(m_s.data, query, vSampled, revValue);
+        }
+        return fsValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        float* revValue) const
+    {
+        float dirPDensity;
+        if (m_isEdf) {
+            if (m_e.isDirectionalEdf)
+                dirPDensity = 0.0f;
+            else
+                dirPDensity = vSampled.z > 0.0f ? vSampled.z / pi_v<float> : 0.0f;
+        }
+        else if (m_inMedium) {
+            dirPDensity = m_m.pf.evaluatePDF(query, vSampled, revValue);
+        }
+        else {
+            dirPDensity = m_s.evaluatePDFWithRev(m_s.data, query, vSampled, revValue);
+        }
+        return dirPDensity;
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool isInMedium() const {
+        return m_inMedium;
+    }
 };
 
 
 
-class BSDF {
-    BSDFTemplate<useGenericBSDF> m_body;
+template <shared::TransportMode transportMode, BSDFGrade bsdfGrade>
+class BSDF;
+
+template <shared::TransportMode transportMode>
+class BSDF<transportMode, BSDFGrade::Unidirectional> {
+    BSDFTemplate<BSDFGrade::Unidirectional, useGenericBSDF> m_body;
 
 public:
-    CUDA_DEVICE_FUNCTION void setup(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
         const shared::SurfaceMaterial &matData, const TexCoord2D &texCoord, const WavelengthSamples &wls,
-        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None) {
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
         m_body.setup(matData, texCoord, wls, flags);
     }
-    CUDA_DEVICE_FUNCTION void setup(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
         const SampledSpectrum &scatteringAlbedo,
-        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None) {
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
         m_body.setup(scatteringAlbedo, flags);
     }
-    CUDA_DEVICE_FUNCTION void getSurfaceParameters(
-        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const {
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hasNonDelta() const {
+        using namespace shared;
+        return m_body.matches(DirectionType::WholeSphere() | DirectionType::NonDelta());
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void getSurfaceParameters(
+        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const
+    {
         return m_body.getSurfaceParameters(diffuseReflectance, specularReflectance, roughness);
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrum sampleF(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDHReflectanceEstimate(
+        const shared::BSDFQuery &query) const
+    {
+        return m_body.evaluateDHReflectanceEstimate(query);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
         const shared::BSDFQuery &query, const shared::BSDFSample &smp,
-        shared::BSDFQueryResult* result) const {
+        shared::BSDFQueryResult* result) const
+    {
+        using namespace shared;
         SampledSpectrum fsValue = m_body.sampleF(query, smp, result);
-        if (m_body.isInMedium())
-            return fsValue;
-
-        float snCorrection = std::fabs(result->dirLocal.z / dot(result->dirLocal, query.geometricNormalLocal));
-        if (!isfinite(snCorrection))
-            return SampledSpectrum::Zero();
-
-        fsValue *= snCorrection;
+        float snCorrection = 1.0f;
+        if (!m_body.isInMedium()) {
+            const Vector3D dirLocal = transportMode == TransportMode::Radiance ?
+                result->dirLocal : query.dirLocal;
+            snCorrection = std::fabs(dirLocal.z / dot(dirLocal, query.geometricNormalLocal));
+            if (!isfinite(snCorrection))
+                return SampledSpectrum::Zero();
+            fsValue *= snCorrection;
+        }
         Assert(
             (result->dirPDensity > 0 && fsValue.allNonNegativeFinite()) ||
             result->dirPDensity == 0,
@@ -2426,20 +2996,20 @@ public:
             snCorrection);
         return fsValue;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateF(
-        const shared::BSDFQuery &query, const Vector3D &vSampled) const {
-        float snCorrection = 0.0f;
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled) const
+    {
+        using namespace shared;
+        SampledSpectrum fsValue = m_body.evaluateF(query, vSampled);
+        float snCorrection = 1.0f;
         if (!m_body.isInMedium()) {
-            snCorrection = std::fabs(vSampled.z / dot(vSampled, query.geometricNormalLocal));
+            const Vector3D dirLocal = transportMode == TransportMode::Radiance ?
+                vSampled : query.dirLocal;
+            snCorrection = std::fabs(dirLocal.z / dot(dirLocal, query.geometricNormalLocal));
             if (!isfinite(snCorrection))
                 return SampledSpectrum::Zero();
+            fsValue *= snCorrection;
         }
-
-        SampledSpectrum fsValue = m_body.evaluateF(query, vSampled);
-        if (m_body.isInMedium())
-            return fsValue;
-
-        fsValue *= snCorrection;
         Assert(
             fsValue.allNonNegativeFinite(),
             "evalBSDF: qDir: (%g, %g, %g), gNormal: (%g, %g, %g), "
@@ -2450,12 +3020,106 @@ public:
             snCorrection);
         return fsValue;
     }
-    CUDA_DEVICE_FUNCTION float evaluatePDF(
-        const shared::BSDFQuery &query, const Vector3D &vSampled) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled) const
+    {
         return m_body.evaluatePDF(query, vSampled);
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrum evaluateDHReflectanceEstimate(const shared::BSDFQuery &query) const {
+};
+
+template <shared::TransportMode transportMode>
+class BSDF<transportMode, BSDFGrade::Bidirectional> {
+    BSDFTemplate<BSDFGrade::Bidirectional, useGenericBSDF> m_body;
+
+public:
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
+        const shared::SurfaceMaterial &matData, const TexCoord2D &texCoord, const WavelengthSamples &wls,
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
+        m_body.setup(matData, texCoord, wls, flags);
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setup(
+        const SampledSpectrum &scatteringAlbedo,
+        shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
+    {
+        m_body.setup(scatteringAlbedo, flags);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void getSurfaceParameters(
+        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const
+    {
+        return m_body.getSurfaceParameters(diffuseReflectance, specularReflectance, roughness);
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDHReflectanceEstimate(
+        const shared::BSDFQuery &query) const
+    {
         return m_body.evaluateDHReflectanceEstimate(query);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hasNonDelta() const {
+        using namespace shared;
+        return m_body.matches(DirectionType::WholeSphere() | DirectionType::NonDelta());
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
+        const shared::BSDFQuery &query, const shared::BSDFSample &smp,
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult) const
+    {
+        using namespace shared;
+        SampledSpectrum fsValue = m_body.sampleF(query, smp, result, revResult);
+        float snCorrection = 1.0f;
+        if (!m_body.isInMedium()) {
+            const Vector3D dirLocal = transportMode == TransportMode::Radiance ?
+                result->dirLocal : query.dirLocal;
+            snCorrection = std::fabs(dirLocal.z / dot(dirLocal, query.geometricNormalLocal));
+            if (!isfinite(snCorrection))
+                return SampledSpectrum::Zero();
+            fsValue *= snCorrection;
+            revResult->fsValue *= snCorrection;
+        }
+        Assert(
+            (result->dirPDensity > 0 && fsValue.allNonNegativeFinite()) ||
+            result->dirPDensity == 0,
+            "sampleBSDF: smp: (%g, %g), qDir: (%g, %g, %g), gNormal: (%g, %g, %g)"
+            "rDir: (%g, %g, %g), dirPDF: %g, "
+            "snCorrection: %g",
+            smp.uDir[0], smp.uDir[1],
+            v3print(query.dirLocal), v3print(query.geometricNormalLocal),
+            v3print(result->dirLocal), result->dirPDensity,
+            snCorrection);
+        return fsValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        SampledSpectrum* revValue) const
+    {
+        using namespace shared;
+        SampledSpectrum fsValue = m_body.evaluateF(query, vSampled, revValue);
+        float snCorrection = 1.0f;
+        if (!m_body.isInMedium()) {
+            const Vector3D dirLocal = transportMode == TransportMode::Radiance ?
+                vSampled : query.dirLocal;
+            snCorrection = std::fabs(dirLocal.z / dot(dirLocal, query.geometricNormalLocal));
+            if (!isfinite(snCorrection))
+                return SampledSpectrum::Zero();
+            fsValue *= snCorrection;
+            *revValue *= snCorrection;
+        }
+        Assert(
+            fsValue.allNonNegativeFinite(),
+            "evalBSDF: qDir: (%g, %g, %g), gNormal: (%g, %g, %g), "
+            "rDir: (%g, %g, %g), "
+            "snCorrection: %g",
+            v3print(query.dirLocal), v3print(query.geometricNormalLocal),
+            v3print(vSampled),
+            snCorrection);
+        return fsValue;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        float* revValue) const
+    {
+        return m_body.evaluatePDF(query, vSampled, revValue);
     }
 };
 

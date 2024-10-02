@@ -68,10 +68,12 @@ struct InteractionPoint {
     }
 };
 
+template <bool computeHypAreaPDens>
 CUDA_DEVICE_FUNCTION CUDA_INLINE void computeSurfacePoint(
     const Instance &inst, const GeometryInstance &geomInst,
-    uint32_t primIndex, float b1, float b2,
-    InteractionPoint* interPt) {
+    const uint32_t primIndex, const float bcB, const float cbC,
+    InteractionPoint* const interPt)
+{
     const Triangle &tri = geomInst.triangles[primIndex];
     const Vertex (&vs)[] = {
         geomInst.vertices[tri.indices[0]],
@@ -84,42 +86,47 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void computeSurfacePoint(
         inst.transform * vs[2].position,
     };
 
-    float b0 = 1 - (b1 + b2);
+    const float bcA = 1 - (bcB + cbC);
 
     interPt->inMedium = false;
-    interPt->position = b0 * ps[0] + b1 * ps[1] + b2 * ps[2];
+    interPt->position = bcA * ps[0] + bcB * ps[1] + cbC * ps[2];
     interPt->asSurf.geometricNormal = cross(ps[1] - ps[0], ps[2] - ps[0]);
-    float area = 0.5f * interPt->asSurf.geometricNormal.length();
+    const float area = 0.5f * interPt->asSurf.geometricNormal.length();
     interPt->asSurf.geometricNormal /= (2 * area);
-    Normal3D localShadingNormal = b0 * vs[0].normal + b1 * vs[1].normal + b2 * vs[2].normal;
-    Vector3D localShadingTangent = b0 * vs[0].tangent + b1 * vs[1].tangent + b2 * vs[2].tangent;
+    const Normal3D localShadingNormal = bcA * vs[0].normal + bcB * vs[1].normal + cbC * vs[2].normal;
+    const Vector3D localShadingTangent = bcA * vs[0].tangent + bcB * vs[1].tangent + cbC * vs[2].tangent;
     interPt->shadingFrame = ReferenceFrame(
         normalize(inst.transform * localShadingNormal),
         normalize(inst.transform * localShadingTangent));
-    interPt->asSurf.texCoord = b0 * vs[0].texCoord + b1 * vs[1].texCoord + b2 * vs[2].texCoord;
+    interPt->asSurf.texCoord = bcA * vs[0].texCoord + bcB * vs[1].texCoord + cbC * vs[2].texCoord;
 
-    const GeometryGroup &geomGroup = plp.s->geometryGroups[inst.geomGroupSlot];
+    if constexpr (computeHypAreaPDens) {
+        const GeometryGroup &geomGroup = plp.s->geometryGroups[inst.geomGroupSlot];
 
-    float lightProb = 1.0f;
-    //if (plp.f->enableEnvironmentalLight)
-    //    lightProb *= (1 - probToSampleEnvLight);
-    float geomGroupImportance = geomGroup.lightGeomInstDist.integral();
-    float instImportance = pow2(inst.uniformScale) * geomGroupImportance;
-    float instProb = instImportance / plp.f->lightInstDist.integral();
-    if (instProb == 0.0f) {
-        interPt->asSurf.hypAreaPDensity = 0.0f;
-        return;
+        float lightProb = 1.0f;
+        //if (plp.f->enableEnvironmentalLight)
+        //    lightProb *= (1 - probToSampleEnvLight);
+        const float geomGroupImportance = geomGroup.lightGeomInstDist.integral();
+        const float instImportance = pow2(inst.uniformScale) * geomGroupImportance;
+        const float instProb = instImportance / plp.f->lightInstDist.integral();
+        if (instProb == 0.0f) {
+            interPt->asSurf.hypAreaPDensity = 0.0f;
+            return;
+        }
+        lightProb *= instProb;
+        const float geomInstImportance = geomInst.emitterPrimDist.integral();
+        const float geomInstProb = geomInstImportance / geomGroupImportance;
+        if (geomInstProb == 0.0f) {
+            interPt->asSurf.hypAreaPDensity = 0.0f;
+            return;
+        }
+        lightProb *= geomInstProb;
+        lightProb *= geomInst.emitterPrimDist.evaluatePMF(primIndex);
+        interPt->asSurf.hypAreaPDensity = lightProb / area;
     }
-    lightProb *= instProb;
-    float geomInstImportance = geomInst.emitterPrimDist.integral();
-    float geomInstProb = geomInstImportance / geomGroupImportance;
-    if (geomInstProb == 0.0f) {
+    else {
         interPt->asSurf.hypAreaPDensity = 0.0f;
-        return;
     }
-    lightProb *= geomInstProb;
-    lightProb *= geomInst.emitterPrimDist.evaluatePMF(primIndex);
-    interPt->asSurf.hypAreaPDensity = lightProb / area;
 }
 
 
@@ -301,9 +308,138 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleLight(
     }
 }
 
+template <bool directional_only>
+CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleLight(
+    const WavelengthSamples &wls,
+    const float ul, const float up0, const float up1, const float ud0, const float ud1,
+    Point3D* const position, Normal3D* const normal, Vector3D* const direction,
+    float* const areaPDensity, float* const dirPDensity)
+{
+    float lightProb = 1.0f;
+
+    float uInst;
+    uint32_t emitterType;
+    if constexpr (directional_only) {
+        uInst = ul;
+        emitterType = 1;
+    }
+    else {
+        float emitterTypeProb;
+        emitterType = sampleDiscrete(
+            ul, &emitterTypeProb, &uInst, plp.f->lightInstDist.integral(), plp.f->dirLightInstDist.integral());
+        lightProb *= emitterTypeProb;
+    }
+    const LightDistribution lightInstDist = emitterType == 0 ?
+        plp.f->lightInstDist : plp.f->dirLightInstDist;
+
+    // JP: まずはインスタンスをサンプルする。
+    // EN: First, sample an instance.
+    float instProb;
+    float uGeomInst;
+    const uint32_t instIdx = lightInstDist.sample(uInst, &instProb, &uGeomInst);
+    const Instance &inst = plp.f->instances[instIdx];
+    lightProb *= instProb;
+    if (instProb == 0.0f) {
+        *areaPDensity = 0.0f;
+        *dirPDensity = 0.0f;
+        return SampledSpectrum::Zero();
+    }
+    //Assert(inst.lightGeomInstDist.integral() > 0.0f,
+    //       "Non-emissive inst %u, prob %g, u: %g(0x%08x).", instIdx, instProb, ul, *(uint32_t*)&ul);
+
+    // JP: 次にサンプルしたインスタンスに属するジオメトリインスタンスをサンプルする。
+    // EN: Next, sample a geometry instance which belongs to the sampled instance.
+    float geomInstProb;
+    float uPrim;
+    const GeometryGroup &geomGroup = plp.s->geometryGroups[inst.geomGroupSlot];
+    const LightDistribution lightGeomInstDist = emitterType == 0 ?
+        geomGroup.lightGeomInstDist : geomGroup.dirLightGeomInstDist;
+    const uint32_t geomInstIdxInGroup = lightGeomInstDist.sample(uGeomInst, &geomInstProb, &uPrim);
+    const uint32_t geomInstIdx = geomGroup.geomInstSlots[geomInstIdxInGroup];
+    const GeometryInstance &geomInst = plp.s->geometryInstances[geomInstIdx];
+    lightProb *= geomInstProb;
+    if (geomInstProb == 0.0f) {
+        *areaPDensity = 0.0f;
+        return SampledSpectrum::Zero();
+    }
+    //Assert(geomInst.emitterPrimDist.integral() > 0.0f,
+    //       "Non-emissive geom inst %u, prob %g, u: %g.", geomInstIdx, geomInstProb, uGeomInst);
+
+    // JP: 最後に、サンプルしたジオメトリインスタンスに属するプリミティブをサンプルする。
+    // EN: Finally, sample a primitive which belongs to the sampled geometry instance.
+    float primProb;
+    const uint32_t primIdx = geomInst.emitterPrimDist.sample(uPrim, &primProb);
+    lightProb *= primProb;
+
+    //printf("%u-%u-%u: %g\n", instIdx, geomInstIdx, primIdx, lightProb);
+
+    const SurfaceMaterial &mat = plp.s->surfaceMaterials[geomInst.surfMatSlot];
+
+    const shared::Triangle &tri = geomInst.triangles[primIdx];
+    const shared::Vertex (&v)[3] = {
+        geomInst.vertices[tri.indices[0]],
+        geomInst.vertices[tri.indices[1]],
+        geomInst.vertices[tri.indices[2]]
+    };
+    const Point3D p[3] = {
+        inst.transform * v[0].position,
+        inst.transform * v[1].position,
+        inst.transform * v[2].position,
+    };
+
+    const Normal3D geomNormal = cross(p[1] - p[0], p[2] - p[0]);
+
+    float t0, t1, t2;
+    {
+        // Uniform sampling on unit triangle
+        // A Low-Distortion Map Between Triangle and Square
+        t0 = 0.5f * up0;
+        t1 = 0.5f * up1;
+        const float offset = t1 - t0;
+        if (offset > 0)
+            t1 += offset;
+        else
+            t0 -= offset;
+        t2 = 1 - (t0 + t1);
+
+        const float recArea = 2.0f / geomNormal.length();
+        *areaPDensity = lightProb * recArea;
+    }
+    *position = t0 * p[0] + t1 * p[1] + t2 * p[2];
+    *normal = t0 * v[0].normal + t1 * v[1].normal + t2 * v[2].normal;
+    *normal = normalize(inst.transform * *normal);
+    if (emitterType == 0) {
+        const Vector3D dirLocal = cosineSampleHemisphere(ud0, ud1);
+        const ReferenceFrame lightFrame(*normal);
+        *direction = lightFrame.fromLocal(dirLocal);
+        *dirPDensity = dirLocal.z / pi_v<float>;
+    }
+    else {
+        *direction = *normal;
+        *dirPDensity = 1.0f;
+    }
+
+    SampledSpectrum Le = SampledSpectrum::Zero();
+    if (mat.emittance) {
+        const TexCoord2D texCoord = t0 * v[0].texCoord + t1 * v[1].texCoord + t2 * v[2].texCoord;
+        const float4 texValue = tex2DLod<float4>(mat.emittance, texCoord.u, texCoord.v, 0.0f);
+        const TripletSpectrum spEmittance = createTripletSpectrum(
+            SpectrumType::LightSource, ColorSpace::Rec709_D65,
+            texValue.x, texValue.y, texValue.z);
+        Le = spEmittance.evaluate(wls);
+        if (emitterType == 0)
+            Le /= pi_v<float>;
+    }
+
+    //printf("Le: " SPDFMT ", dir: " V3FMT "\n", spdprint(Le), v3print(*direction));
+
+    return Le;
+}
+
 CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum performNextEventEstimation(
-    const InteractionPoint &interPt, const BSDF &bsdf, const BSDFQuery &bsdfQuery,
-    const WavelengthSamples &wls, PCG32RNG &rng) {
+    const InteractionPoint &interPt,
+    const BSDF<TransportMode::Radiance, BSDFGrade::Unidirectional> &bsdf,
+    const BSDFQuery &bsdfQuery, const WavelengthSamples &wls, PCG32RNG &rng) {
     float uLight = rng.getFloat0cTo1o();
     bool selectEnvLight = false;
     float probToSampleCurLightType = 1.0f;

@@ -24,6 +24,11 @@ enum class LightTracingEntryPoint {
     lightTrace,
 };
 
+enum class LvcBptEntryPoint {
+    generateLightVertices,
+    traceEyeSubPaths,
+};
+
 struct GPUEnvironment {
     CUcontext cuContext;
     optixu::Context optixContext;
@@ -70,6 +75,7 @@ struct GPUEnvironment {
 
     Pipeline<PathTracingEntryPoint> pathTracing;
     Pipeline<LightTracingEntryPoint> lightTracing;
+    Pipeline<LvcBptEntryPoint> lvcBpt;
 
     void initialize();
 
@@ -187,20 +193,20 @@ public:
 
     BoundingBox3D computeSceneAABB(float timePoint) const;
 
-    shared::SurfaceMaterial* getSurfaceMaterialsOnDevice() const {
-        return m_surfaceMaterialBuffer.getDevicePointer();
+    shared::ROBuffer<shared::SurfaceMaterial> getSurfaceMaterialsOnDevice() const {
+        return m_surfaceMaterialBuffer.getROBuffer<shared::enableBufferOobCheck>();
     }
 
-    shared::GeometryInstance* getGeometryInstancesOnDevice() const {
-        return m_geometryInstanceBuffer.getDevicePointer();
+    shared::ROBuffer<shared::GeometryInstance> getGeometryInstancesOnDevice() const {
+        return m_geometryInstanceBuffer.getROBuffer<shared::enableBufferOobCheck>();
     }
 
-    shared::GeometryGroup* getGeometryGroupsOnDevice() const {
-        return m_geometryGroupBuffer.getDevicePointer();
+    shared::ROBuffer<shared::GeometryGroup> getGeometryGroupsOnDevice() const {
+        return m_geometryGroupBuffer.getROBuffer<shared::enableBufferOobCheck>();
     }
 
-    shared::Instance* getInstancesOnDevice() const {
-        return m_instanceBuffer.getDevicePointer();
+    shared::ROBuffer<shared::Instance> getInstancesOnDevice() const {
+        return m_instanceBuffer.getROBuffer<shared::enableBufferOobCheck>();
     }
 
 
@@ -348,11 +354,15 @@ public:
     static void setBSDFProcedureSet() {
         shared::BSDFProcedureSet procSet;
         procSet.setupBSDFBody = CallableProgram_setupLambertBRDF;
-        procSet.getSurfaceParameters = CallableProgram_LambertBRDF_getSurfaceParameters;
-        procSet.sampleF = CallableProgram_LambertBRDF_sampleF;
-        procSet.evaluateF = CallableProgram_LambertBRDF_evaluateF;
-        procSet.evaluatePDF = CallableProgram_LambertBRDF_evaluatePDF;
         procSet.evaluateDHReflectanceEstimate = CallableProgram_LambertBRDF_evaluateDHReflectanceEstimate;
+        procSet.getSurfaceParameters = CallableProgram_LambertBRDF_getSurfaceParameters;
+        procSet.matches = CallableProgram_LambertBRDF_matches;
+        procSet.sampleF = CallableProgram_LambertBRDF_sampleF;
+        procSet.sampleFWithRev = CallableProgram_LambertBRDF_sampleFWithRev;
+        procSet.evaluateF = CallableProgram_LambertBRDF_evaluateF;
+        procSet.evaluateFWithRev = CallableProgram_LambertBRDF_evaluateFWithRev;
+        procSet.evaluatePDF = CallableProgram_LambertBRDF_evaluatePDF;
+        procSet.evaluatePDFWithRev = CallableProgram_LambertBRDF_evaluatePDFWithRev;
         s_procSetSlot = g_gpuEnv.registerBSDFProcedureSet(procSet);
     }
 
@@ -395,10 +405,14 @@ public:
         shared::BSDFProcedureSet procSet;
         procSet.setupBSDFBody = CallableProgram_setupSimplePBR_BRDF;
         procSet.getSurfaceParameters = CallableProgram_DichromaticBRDF_getSurfaceParameters;
-        procSet.sampleF = CallableProgram_DichromaticBRDF_sampleF;
-        procSet.evaluateF = CallableProgram_DichromaticBRDF_evaluateF;
-        procSet.evaluatePDF = CallableProgram_DichromaticBRDF_evaluatePDF;
         procSet.evaluateDHReflectanceEstimate = CallableProgram_DichromaticBRDF_evaluateDHReflectanceEstimate;
+        procSet.matches = CallableProgram_DichromaticBRDF_matches;
+        procSet.sampleF = CallableProgram_DichromaticBRDF_sampleF;
+        procSet.sampleFWithRev = CallableProgram_DichromaticBRDF_sampleFWithRev;
+        procSet.evaluateF = CallableProgram_DichromaticBRDF_evaluateF;
+        procSet.evaluateFWithRev = CallableProgram_DichromaticBRDF_evaluateFWithRev;
+        procSet.evaluatePDF = CallableProgram_DichromaticBRDF_evaluatePDF;
+        procSet.evaluatePDFWithRev = CallableProgram_DichromaticBRDF_evaluatePDFWithRev;
         s_procSetSlot = g_gpuEnv.registerBSDFProcedureSet(procSet);
     }
 
@@ -550,8 +564,8 @@ public:
 
         *deviceData = {};
         Geometry::setUpDeviceData(deviceData);
-        deviceData->vertices = m_vertices->onDevice.getDevicePointer();
-        deviceData->triangles = m_triangles.getDevicePointer();
+        deviceData->vertices = m_vertices->onDevice.getROBuffer<shared::enableBufferOobCheck>();
+        deviceData->triangles = m_triangles.getROBuffer<shared::enableBufferOobCheck>();
         if (m_emitterPrimDist.isInitialized())
             m_emitterPrimDist.getDeviceType(&deviceData->emitterPrimDist);
         else
@@ -693,7 +707,7 @@ public:
             return false;
 
         *deviceData = {};
-        deviceData->geomInstSlots = m_geomInstSlotBuffer.getDevicePointer();
+        deviceData->geomInstSlots = m_geomInstSlotBuffer.getROBuffer<shared::enableBufferOobCheck>();
         m_lightGeomInstDist.getDeviceType(&deviceData->lightGeomInstDist);
         m_dirLightGeomInstDist.getDeviceType(&deviceData->dirLightGeomInstDist);
         deviceData->aabb = m_aabb;
