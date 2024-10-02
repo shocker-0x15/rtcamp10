@@ -222,8 +222,10 @@ void GPUEnvironment::initialize() {
             /*DEBUG_SELECT(OPTIX_COMPILE_OPTIMIZATION_LEVEL_0, */OPTIX_COMPILE_OPTIMIZATION_DEFAULT/*)*/,
             /*DEBUG_SELECT(OPTIX_COMPILE_DEBUG_LEVEL_FULL, */OPTIX_COMPILE_DEBUG_LEVEL_NONE/*)*/);
 
-        pipeline.entryPoints[LvcBptEntryPoint::generateLightVertices] =
+        pipeline.entryPoints[LvcBptEntryPoint::GenerateLightVertices] =
             p.createRayGenProgram(m, RT_RG_NAME_STR("generateLightVertices"));
+        pipeline.entryPoints[LvcBptEntryPoint::EyePaths] =
+            p.createRayGenProgram(m, RT_RG_NAME_STR("eyePaths"));
 
         optixu::HitProgramGroup getHitInfo = p.createHitProgramGroupForTriangleIS(
             m, RT_CH_NAME_STR("getHitInfo"),

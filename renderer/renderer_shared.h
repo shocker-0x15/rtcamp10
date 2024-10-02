@@ -198,6 +198,15 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE bool getDebugPrintEnabled() {
     return plp.f->enableDebugPrint;
 }
 
+CUDA_DEVICE_FUNCTION CUDA_INLINE bool isDebugPixel(const int2 launchIndex) {
+    const int2 mousePos = getMousePosition();
+    return launchIndex.x == mousePos.x && launchIndex.y == mousePos.y && getDebugPrintEnabled();
+}
+
+CUDA_DEVICE_FUNCTION CUDA_INLINE bool isDebugPixel(const uint2 launchIndex) {
+    return isDebugPixel(make_int2(launchIndex.x, launchIndex.y));
+}
+
 CUDA_DEVICE_FUNCTION CUDA_INLINE const shared::BSDFProcedureSet &getBSDFProcedureSet(uint32_t slot) {
     return plp.s->bsdfProcedureSets[slot];
 }

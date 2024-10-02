@@ -210,6 +210,11 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
             deltaSampled = true;
         }
 
+        if (dirPDens == 0.0f) {
+            plp.s->ltRngBuffer[launchIndex] = rng;
+            return;
+        }
+
         cosTerm = lightPt.calcDot(rayDir);
         throughput *= Le1 * (cosTerm / dirPDens);
     }
@@ -561,7 +566,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
     const SampledSpectrum unweightedContribution = lVtx.flux * conTerm * throughput;
 
     const float recMisWeight = 1.0f + lPartialDenomMisWeight;
-    const float misWeight = 1.0f / recMisWeight;
+    const float misWeight = debugPathLength == 0 ? 1.0f / recMisWeight : 1.0f;
     const SampledSpectrum contribution = misWeight * unweightedContribution;
     const float2 pixel = make_float2(
         screenPos.x * plp.s->imageSize.x, screenPos.y * plp.s->imageSize.y);
@@ -603,10 +608,13 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(eyePaths)() {
         deltaSampled = true;
         const float areaPDens = 1.0f;
 
-        throughput = We0 / (areaPDens * plp.s->lvcBptPassInfo->wlPDens);
+        const float imageSizeCorrFactor = plp.s->imageSize.x * plp.s->imageSize.y;
+        throughput = We0 / (areaPDens * plp.s->lvcBptPassInfo->wlPDens * imageSizeCorrFactor);
 
         connectFromLens(throughput, eInterPt, wls, rng.getFloat0cTo1o());
 
         rayOrg = eInterPt.position;
     }
+
+    plp.s->rngBuffer.write(launchIndex, rng);
 }

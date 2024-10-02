@@ -25,8 +25,8 @@ enum class LightTracingEntryPoint {
 };
 
 enum class LvcBptEntryPoint {
-    generateLightVertices,
-    traceEyeSubPaths,
+    GenerateLightVertices,
+    EyePaths,
 };
 
 struct GPUEnvironment {

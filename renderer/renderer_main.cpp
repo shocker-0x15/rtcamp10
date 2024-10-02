@@ -1051,6 +1051,9 @@ static int32_t runGuiApp() {
             curCuStream, plpOnDevice, numLightTracingPaths, 1, 1);
         //CUDADRV_CHECK(cuStreamSynchronize(curCuStream));
 #else
+        g_gpuEnv.clearLtTargetBuffer.launchWithThreadDim(
+            curCuStream, cudau::dim3(renderTargetSizeX, renderTargetSizeY));
+
         shared::LvcBptPassInfo lvcBptPassInfoOnHost = {};
         lvcBptPassInfoOnHost.wls = WavelengthSamples::createWithEqualOffsets(
             u01(perFrameRng), u01(perFrameRng), &lvcBptPassInfoOnHost.wlPDens);
@@ -1059,28 +1062,31 @@ static int32_t runGuiApp() {
             lvcBptPassInfo.getCUdeviceptr(), &lvcBptPassInfoOnHost,
             sizeof(lvcBptPassInfoOnHost), curCuStream));
 
-        g_gpuEnv.lvcBpt.setEntryPoint(LvcBptEntryPoint::generateLightVertices);
+        g_gpuEnv.lvcBpt.setEntryPoint(LvcBptEntryPoint::GenerateLightVertices);
         g_gpuEnv.lvcBpt.optixPipeline.launch(
             curCuStream, plpOnDevice, numLightTracingPaths, 1, 1);
-        CUDADRV_CHECK(cuStreamSynchronize(curCuStream));
-        CUDADRV_CHECK(cuMemcpyDtoH(
-            &lvcBptPassInfoOnHost, lvcBptPassInfo.getCUdeviceptr(),
-            sizeof(lvcBptPassInfoOnHost)));
-        std::vector<shared::LightPathVertex> lightVertexCacheOnHost = lightVertexCache;
-        std::vector<uint32_t> counts;
-        for (uint32_t i = 0; i < lvcBptPassInfoOnHost.numLightVertices; ++i) {
-            const shared::LightPathVertex &v = lightVertexCacheOnHost[i];
-            if (v.pathLength >= counts.size())
-                counts.resize(v.pathLength + 1, 0u);
-            ++counts[v.pathLength];
+        //CUDADRV_CHECK(cuStreamSynchronize(curCuStream));
+        //CUDADRV_CHECK(cuMemcpyDtoH(
+        //    &lvcBptPassInfoOnHost, lvcBptPassInfo.getCUdeviceptr(),
+        //    sizeof(lvcBptPassInfoOnHost)));
+        //std::vector<shared::LightPathVertex> lightVertexCacheOnHost = lightVertexCache;
+        //std::vector<uint32_t> counts;
+        //for (uint32_t i = 0; i < lvcBptPassInfoOnHost.numLightVertices; ++i) {
+        //    const shared::LightPathVertex &v = lightVertexCacheOnHost[i];
+        //    if (v.pathLength >= counts.size())
+        //        counts.resize(v.pathLength + 1, 0u);
+        //    ++counts[v.pathLength];
 
-            if (v.pathLength == 1)
-                printf("");
-            else if (v.pathLength == 2)
-                printf("");
-            else if (v.pathLength == 3)
-                printf("");
-        }
+        //    if (v.pathLength == 1)
+        //        printf("");
+        //    else if (v.pathLength == 2)
+        //        printf("");
+        //    else if (v.pathLength == 3)
+        //        printf("");
+        //}
+        g_gpuEnv.lvcBpt.setEntryPoint(LvcBptEntryPoint::EyePaths);
+        g_gpuEnv.lvcBpt.optixPipeline.launch(
+            curCuStream, plpOnDevice, renderTargetSizeX, renderTargetSizeY, 1);
 #endif
 
         curGpuTimer.rendering.stop(curCuStream);

@@ -7,7 +7,7 @@ CUDA_DEVICE_KERNEL void RT_AH_NAME(visibility)() {
 
 
 
-#define USE_ONLY_DIRECTIONAL_LIGHT 0
+#define USE_ONLY_DIRECTIONAL_LIGHT 1
 
 CUDA_DEVICE_FUNCTION CUDA_INLINE void performNextEventEstimation(
     const SampledSpectrum &throughput,
