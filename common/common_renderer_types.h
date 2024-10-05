@@ -971,7 +971,7 @@ struct SurfaceMaterial;
 struct BSDFBuildFlags {
     enum Value {
         None = 0,
-        FromEDF,
+        FromEDF = 1 << 0,
     } value;
 
     CUDA_COMMON_FUNCTION constexpr BSDFBuildFlags(Value v = None) : value(v) {}
@@ -1196,8 +1196,11 @@ struct PerspectiveCamera {
     Point3D position;
     Quaternion orientation;
 
-    CUDA_COMMON_FUNCTION CUDA_INLINE SampledSpectrum sampleRay(
-        const float2 &screenPos, Point3D* const rayOrg, Vector3D* const rayDir,
+    CUDA_COMMON_FUNCTION CUDA_INLINE void sampleRay(
+        const float2 &screenPos,
+        Point3D* const rayOrg, SampledSpectrum* const We0,
+        float* const areaPDens,
+        Vector3D* const rayDir, SampledSpectrum* const We1,
         float* const dirPDens, float* const cosTerm) const
     {
         const float vh = 2 * std::tan(fovY * 0.5f);
@@ -1205,13 +1208,15 @@ struct PerspectiveCamera {
         const float sensorArea = vw * vh; // normalized
 
         *rayOrg = position;
+        *We0 = SampledSpectrum::One();
+        *areaPDens = 1.0f;
+
         const Vector3D localRayDir = normalize(Vector3D(
             vw * (-0.5f + screenPos.x), vh * (0.5f - screenPos.y), -1));
         *rayDir = orientation.toMatrix3x3() * localRayDir;
+        *We1 = SampledSpectrum::One();
         *cosTerm = -localRayDir.z;
         *dirPDens = 1 / (pow3(*cosTerm) * sensorArea);
-
-        return SampledSpectrum::One(); // We0 * We1
     }
 
     CUDA_COMMON_FUNCTION CUDA_INLINE bool calcScreenPosition(
@@ -1236,8 +1241,15 @@ struct PerspectiveCamera {
 
         *cosTerm = -localRayDir.z;
         const float2 posAtZ1 = make_float2(localRayDir.x / *cosTerm, localRayDir.y / *cosTerm);
-        *We = SampledSpectrum::One(); // We0 * We1
         *screenPos = make_float2(0.5f + posAtZ1.x / vw, 0.5f - posAtZ1.y / vh);
+        if (screenPos->x < 0 || screenPos->x >= 1.0f ||
+            screenPos->y < 0 || screenPos->y >= 1.0f)
+        {
+            *We = SampledSpectrum::Zero();
+            *dirPDens = 0.0f;
+            return false;
+        }
+        *We = SampledSpectrum::One(); // We0 * We1
         *dirPDens = 1 / (pow3(*cosTerm) * sensorArea);
 
         return true;
@@ -2627,12 +2639,15 @@ public:
                 fsValue = SampledSpectrum::Zero();
             else
                 fsValue = vSampled.z > 0.0f ? 1.0f / pi_v<float> : 0.0f;
+
+            if (revValue)
+                *revValue = SampledSpectrum::Zero();
         }
         else if (m_inMedium) {
             fsValue = m_m.scatteringAlbedo * m_m.pf.evaluateF(query, vSampled, revValue);
         }
         else {
-            fsValue = m_bsdf.evaluateF(query, vSampled);
+            fsValue = m_bsdf.evaluateF(query, vSampled, revValue);
         }
         return fsValue;
     }
@@ -2646,6 +2661,9 @@ public:
                 dirPDensity = 0.0f;
             else
                 dirPDensity = vSampled.z > 0.0f ? vSampled.z / pi_v<float> : 0.0f;
+
+            if (revValue)
+                *revValue = 0.0f;
         }
         else if (m_inMedium) {
             dirPDensity = m_m.pf.evaluatePDF(query, vSampled, revValue);
@@ -2896,6 +2914,9 @@ public:
                 fsValue = SampledSpectrum::Zero();
             else
                 fsValue = vSampled.z > 0.0f ? 1.0f / pi_v<float> : 0.0f;
+
+            if (revValue)
+                *revValue = SampledSpectrum::Zero();
         }
         else if (m_inMedium) {
             fsValue = m_m.scatteringAlbedo * m_m.pf.evaluateF(query, vSampled, revValue);
@@ -2915,6 +2936,9 @@ public:
                 dirPDensity = 0.0f;
             else
                 dirPDensity = vSampled.z > 0.0f ? vSampled.z / pi_v<float> : 0.0f;
+
+            if (revValue)
+                *revValue = 0.0f;
         }
         else if (m_inMedium) {
             dirPDensity = m_m.pf.evaluatePDF(query, vSampled, revValue);

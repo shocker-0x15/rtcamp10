@@ -25,18 +25,18 @@ CUDA_DEVICE_KERNEL void applyToneMap() {
         launchIndex.y >= plp.s->imageSize.y)
         return;
 
-    const float imageSizeCorrFactor = plp.s->imageSize.x * plp.s->imageSize.y;
     plp.s->accumBuffer[launchIndex].add(
-        plp.s->ltTargetBuffer[launchIndex] * imageSizeCorrFactor);
+        plp.s->ltTargetBuffer[launchIndex]);
     const DiscretizedSpectrum &accumResult = plp.s->accumBuffer[launchIndex].getValue().result;
     float colorXYZ[3];
     accumResult.toXYZ(colorXYZ);
     float colorRGB[3];
     transformTristimulus(mat_XYZ_to_Rec709_D65, colorXYZ, colorRGB);
-    float recNumAccums = 1.0f / (plp.f->numAccumFrames + 1);
-    colorRGB[0] *= recNumAccums;
-    colorRGB[1] *= recNumAccums;
-    colorRGB[2] *= recNumAccums;
+    const float imageSizeCorrFactor = plp.s->imageSize.x * plp.s->imageSize.y;
+    const float scale = imageSizeCorrFactor / (plp.f->numAccumFrames + 1);
+    colorRGB[0] *= scale;
+    colorRGB[1] *= scale;
+    colorRGB[2] *= scale;
     //constexpr float gamma = 1.0f / 0.6f;
     //accumResult.r = std::pow(accumResult.r, gamma);
     //accumResult.g = std::pow(accumResult.g, gamma);

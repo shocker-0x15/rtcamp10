@@ -17,20 +17,28 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
 
     const PerspectiveCamera &camera = plp.f->camera;
 
+    SampledSpectrum We0;
+    SampledSpectrum We1;
     Point3D rayOrigin;
     Vector3D rayDirection;
+    float areaPDens;
+    float dirPDens;
     float cosX0;
-    float dirPDensity;
     const float2 screenPos(
         (launchIndex.x + rng.getFloat0cTo1o()) / plp.s->imageSize.x,
         (launchIndex.y + rng.getFloat0cTo1o()) / plp.s->imageSize.y);
-    const SampledSpectrum We = camera.sampleRay(screenPos, &rayOrigin, &rayDirection, &dirPDensity, &cosX0);
+    camera.sampleRay(
+        screenPos,
+        &rayOrigin, &We0, &areaPDens,
+        &rayDirection, &We1, &dirPDens, &cosX0);
 
     float wlPDensity;
     auto wls = WavelengthSamples::createWithEqualOffsets(rng.getFloat0cTo1o(), rng.getFloat0cTo1o(), &wlPDensity);
 
     auto contribution = SampledSpectrum::Zero();
-    SampledSpectrum throughput = We * (cosX0 / (dirPDensity * wlPDensity));
+    const float imageSizeCorrFactor = plp.s->imageSize.x * plp.s->imageSize.y;
+    SampledSpectrum throughput = (We0 * We1) *
+        (cosX0 / (areaPDens * dirPDens * wlPDensity * imageSizeCorrFactor));
     float initImportance = throughput.importance(wls.selectedLambdaIndex());
     uint32_t pathLength = 0;
     while (true) {
@@ -100,7 +108,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
                 if (pathLength > 1) {
                     float dist2 = squaredDistance(rayOrigin, interPt.position);
                     float lightPDensity = interPt.asSurf.hypAreaPDensity * dist2 / vOutLocal.z;
-                    float bsdfPDensity = dirPDensity;
+                    float bsdfPDensity = dirPDens;
                     misWeight = pow2(bsdfPDensity) / (pow2(bsdfPDensity) + pow2(lightPDensity));
                 }
                 // Assume a diffuse emitter.
@@ -150,7 +158,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
             spdprint(localThroughput), dotSGN, bsdfResult.dirPDensity);
 
         rayOrigin = interPt.calcOffsetRayOrigin(dotSGN > 0.0f);
-        dirPDensity = bsdfResult.dirPDensity;
+        dirPDens = bsdfResult.dirPDensity;
     }
 
     plp.s->rngBuffer.write(launchIndex, rng);

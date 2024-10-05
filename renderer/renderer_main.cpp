@@ -1084,6 +1084,7 @@ static int32_t runGuiApp() {
         //    else if (v.pathLength == 3)
         //        printf("");
         //}
+
         g_gpuEnv.lvcBpt.setEntryPoint(LvcBptEntryPoint::EyePaths);
         g_gpuEnv.lvcBpt.optixPipeline.launch(
             curCuStream, plpOnDevice, renderTargetSizeX, renderTargetSizeY, 1);
