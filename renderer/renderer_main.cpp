@@ -373,6 +373,20 @@ static uint32_t g_endTimeStepIndex = UINT32_MAX;
 
 
 
+static float computeHaltonSequence(uint32_t base, uint32_t idx) {
+    const float recBase = 1.0f / base;
+    float ret = 0.0f;
+    float scale = 1.0f;
+    while (idx) {
+        scale *= recBase;
+        ret += (idx % base) * scale;
+        idx /= base;
+    }
+    return ret;
+}
+
+static float wavelengthRandoms[1024];
+
 static int32_t runGuiApp() {
     const std::filesystem::path exeDir = getExecutableDirectory();
 
@@ -1056,7 +1070,8 @@ static int32_t runGuiApp() {
 
         shared::LvcBptPassInfo lvcBptPassInfoOnHost = {};
         lvcBptPassInfoOnHost.wls = WavelengthSamples::createWithEqualOffsets(
-            u01(perFrameRng), u01(perFrameRng), &lvcBptPassInfoOnHost.wlPDens);
+            wavelengthRandoms[numAccumFrames % lengthof(wavelengthRandoms)],
+            u01(perFrameRng), &lvcBptPassInfoOnHost.wlPDens);
         lvcBptPassInfoOnHost.numLightVertices = 0;
         CUDADRV_CHECK(cuMemcpyHtoDAsync(
             lvcBptPassInfo.getCUdeviceptr(), &lvcBptPassInfoOnHost,
@@ -1376,6 +1391,9 @@ int32_t mainFunc(int32_t argc, const char* argv[]) {
     g_gpuEnv.setupDeviceData();
 
     g_scene.initialize();
+
+    for (uint32_t i = 0; i < lengthof(wavelengthRandoms); ++i)
+        wavelengthRandoms[i] = computeHaltonSequence(2, i);
 
     int32_t ret;
     if (g_guiMode)
