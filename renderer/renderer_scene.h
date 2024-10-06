@@ -394,6 +394,66 @@ public:
 
 
 
+class SpecularScatteringSurfaceMaterial : public SurfaceMaterial {
+    static uint32_t s_procSetSlot;
+
+    float m_iorExt;
+    float m_abbeNumExt;
+    float m_iorInt;
+    float m_abbeNumInt;
+
+public:
+    static void setBSDFProcedureSet() {
+        shared::BSDFProcedureSet procSet;
+        procSet.setupBSDFBody = CallableProgram_setupSpecularBSDF;
+        procSet.evaluateDHReflectanceEstimate = CallableProgram_SpecularBSDF_evaluateDHReflectanceEstimate;
+        procSet.getSurfaceParameters = CallableProgram_SpecularBSDF_getSurfaceParameters;
+        procSet.matches = CallableProgram_SpecularBSDF_matches;
+        procSet.sampleF = CallableProgram_SpecularBSDF_sampleF;
+        procSet.sampleFWithRev = CallableProgram_SpecularBSDF_sampleFWithRev;
+        procSet.evaluateF = CallableProgram_SpecularBSDF_evaluateF;
+        procSet.evaluateFWithRev = CallableProgram_SpecularBSDF_evaluateFWithRev;
+        procSet.evaluatePDF = CallableProgram_SpecularBSDF_evaluatePDF;
+        procSet.evaluatePDFWithRev = CallableProgram_SpecularBSDF_evaluatePDFWithRev;
+        s_procSetSlot = g_gpuEnv.registerBSDFProcedureSet(procSet);
+    }
+
+    SpecularScatteringSurfaceMaterial() :
+        m_iorExt(1.0f), m_abbeNumExt(1.0f),
+        m_iorInt(1.517f), m_abbeNumInt(64.20f) {}
+
+    void set(
+        float iorExt, float abbeNumExt,
+        float iorInt, float abbeNumInt) {
+        m_iorExt = iorExt;
+        m_abbeNumExt = abbeNumExt;
+        m_iorInt = iorInt;
+        m_abbeNumInt = abbeNumInt;
+
+        m_dirty = true;
+    }
+
+    bool setUpDeviceData(shared::SurfaceMaterial* deviceData) override {
+        if (!m_dirty)
+            return false;
+
+        *deviceData = {};
+        SurfaceMaterial::setUpDeviceData(deviceData);
+        auto &body = *reinterpret_cast<shared::SpecularScatteringSurfaceMaterial*>(deviceData->body);
+        body.iorExt = m_iorExt;
+        body.abbeNumExt = m_abbeNumExt;
+        body.iorInt = m_iorInt;
+        body.abbeNumInt = m_abbeNumInt;
+        deviceData->bsdfProcSetSlot = s_procSetSlot;
+        deviceData->setupBSDFBody = CallableProgram_setupLambertBRDF;
+
+        m_dirty = false;
+        return true;
+    }
+};
+
+
+
 class SimplePBRSurfaceMaterial : public SurfaceMaterial {
     static uint32_t s_procSetSlot;
 

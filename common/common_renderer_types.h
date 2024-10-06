@@ -126,6 +126,16 @@ namespace rtc10 {
     PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluateFWithRev), \
     PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluatePDF), \
     PROCESS_DYNAMIC_FUNCTION(LambertBRDF_evaluatePDFWithRev), \
+    PROCESS_DYNAMIC_FUNCTION(setupSpecularBSDF), \
+    PROCESS_DYNAMIC_FUNCTION(SpecularBSDF_getSurfaceParameters), \
+    PROCESS_DYNAMIC_FUNCTION(SpecularBSDF_evaluateDHReflectanceEstimate), \
+    PROCESS_DYNAMIC_FUNCTION(SpecularBSDF_matches), \
+    PROCESS_DYNAMIC_FUNCTION(SpecularBSDF_sampleF), \
+    PROCESS_DYNAMIC_FUNCTION(SpecularBSDF_sampleFWithRev), \
+    PROCESS_DYNAMIC_FUNCTION(SpecularBSDF_evaluateF), \
+    PROCESS_DYNAMIC_FUNCTION(SpecularBSDF_evaluateFWithRev), \
+    PROCESS_DYNAMIC_FUNCTION(SpecularBSDF_evaluatePDF), \
+    PROCESS_DYNAMIC_FUNCTION(SpecularBSDF_evaluatePDFWithRev), \
     PROCESS_DYNAMIC_FUNCTION(setupDichromaticBRDF), \
     PROCESS_DYNAMIC_FUNCTION(setupSimplePBR_BRDF), \
     PROCESS_DYNAMIC_FUNCTION(DichromaticBRDF_getSurfaceParameters), \
@@ -825,40 +835,40 @@ struct DirectionType {
 
     InternalEnum value;
 
-    CUDA_DEVICE_FUNCTION DirectionType() { }
-    CUDA_DEVICE_FUNCTION constexpr DirectionType(InternalEnum v) : value(v) { }
-    CUDA_DEVICE_FUNCTION constexpr DirectionType &operator&=(const DirectionType &r) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE DirectionType() : value(InternalEnum(0)) { }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr DirectionType(InternalEnum v) : value(v) { }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr DirectionType &operator&=(const DirectionType &r) {
         value = static_cast<InternalEnum>(value & r.value);
         return *this;
     }
-    CUDA_DEVICE_FUNCTION constexpr DirectionType &operator|=(const DirectionType &r) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr DirectionType &operator|=(const DirectionType &r) {
         value = static_cast<InternalEnum>(value | r.value);
         return *this;
     }
-    CUDA_DEVICE_FUNCTION constexpr DirectionType flip() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr DirectionType flip() const {
         return static_cast<InternalEnum>(value ^ IE_WholeSphere);
     }
 
-    CUDA_DEVICE_FUNCTION constexpr bool matches(DirectionType t) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr bool matches(DirectionType t) const {
         uint32_t res = value & t.value;
         return (res & IE_WholeSphere) && (res & IE_AllFreq);
     }
-    CUDA_DEVICE_FUNCTION constexpr bool hasNonDelta() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr bool hasNonDelta() const {
         return value & IE_NonDelta;
     }
-    CUDA_DEVICE_FUNCTION constexpr bool hasDelta() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr bool hasDelta() const {
         return value & IE_Delta;
     }
-    CUDA_DEVICE_FUNCTION constexpr bool isDelta() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr bool isDelta() const {
         return (value & IE_Delta) && !(value & IE_NonDelta);
     }
-    CUDA_DEVICE_FUNCTION constexpr bool isReflection() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr bool isReflection() const {
         return (value & IE_Reflection) && !(value & IE_Transmission);
     }
-    CUDA_DEVICE_FUNCTION constexpr bool isTransmission() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr bool isTransmission() const {
         return !(value & IE_Reflection) && (value & IE_Transmission);
     }
-    CUDA_DEVICE_FUNCTION constexpr bool isDispersive() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr bool isDispersive() const {
         return value & IE_Dispersive;
     }
 
@@ -1086,6 +1096,13 @@ struct EDFQueryResult {
 struct LambertianSurfaceMaterial {
     CUtexObject reflectance;
     TexDimInfo reflectanceDimInfo;
+};
+
+struct SpecularScatteringSurfaceMaterial {
+    float iorExt;
+    float abbeNumExt;
+    float iorInt;
+    float abbeNumInt;
 };
 
 struct DichromaticSurfaceMaterial {
@@ -1776,6 +1793,215 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<LambertBRDF>(
 
 
 
+class SpecularBSDF {
+    class FresnelDielectric {
+        SampledSpectrum m_etaExt;
+        SampledSpectrum m_etaInt;
+
+    public:
+        CUDA_DEVICE_FUNCTION CUDA_INLINE FresnelDielectric() {}
+        CUDA_DEVICE_FUNCTION CUDA_INLINE FresnelDielectric(
+            const SampledSpectrum &etaExt, const SampledSpectrum &etaInt) :
+            m_etaExt(etaExt), m_etaInt(etaInt) {}
+
+        CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum etaExt() const { return m_etaExt; }
+        CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum etaInt() const { return m_etaInt; }
+
+        CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluate(float cosEnter) const {
+            cosEnter = clamp(cosEnter, -1.0f, 1.0f);
+
+            const bool entering = cosEnter > 0.0f;
+            const SampledSpectrum &eEnter = entering ? m_etaExt : m_etaInt;
+            const SampledSpectrum &eExit = entering ? m_etaInt : m_etaExt;
+
+            const SampledSpectrum sinExit = eEnter / eExit * std::sqrt(std::fmax(0.0f, 1.0f - cosEnter * cosEnter));
+            SampledSpectrum ret = SampledSpectrum::Zero();
+            cosEnter = std::fabs(cosEnter);
+            for (int i = 0; i < SampledSpectrum::NumComponents(); ++i) {
+                if (sinExit[i] >= 1.0f) {
+                    ret[i] = 1.0f;
+                }
+                else {
+                    const float cosExit = std::sqrt(std::fmax(0.0f, 1.0f - sinExit[i] * sinExit[i]));
+                    ret[i] = evalF(eEnter[i], eExit[i], cosEnter, cosExit);
+                }
+            }
+            return ret;
+        }
+        CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluate(float cosEnter, uint32_t wlIdx) const {
+            cosEnter = clamp(cosEnter, -1.0f, 1.0f);
+
+            const bool entering = cosEnter > 0.0f;
+            const float &eEnter = entering ? m_etaExt[wlIdx] : m_etaInt[wlIdx];
+            const float &eExit = entering ? m_etaInt[wlIdx] : m_etaExt[wlIdx];
+
+            const float sinExit = eEnter / eExit * std::sqrt(std::fmax(0.0f, 1.0f - cosEnter * cosEnter));
+            cosEnter = std::fabs(cosEnter);
+            if (sinExit >= 1.0f) {
+                return 1.0f;
+            }
+            else {
+                const float cosExit = std::sqrt(std::fmax(0.0f, 1.0f - sinExit * sinExit));
+                return evalF(eEnter, eExit, cosEnter, cosExit);
+            }
+        }
+
+        CUDA_DEVICE_FUNCTION CUDA_INLINE static float evalF(
+            float etaEnter, float etaExit, float cosEnter, float cosExit)
+        {
+            const float Rparl =
+                ((etaExit * cosEnter) - (etaEnter * cosExit)) /
+                ((etaExit * cosEnter) + (etaEnter * cosExit));
+            const float Rperp =
+                ((etaEnter * cosEnter) - (etaExit * cosExit)) /
+                ((etaEnter * cosEnter) + (etaExit * cosExit));
+            return (Rparl * Rparl + Rperp * Rperp) / 2.0f;
+        }
+    };
+
+    SampledSpectrum m_etaExt;
+    SampledSpectrum m_etaInt;
+    uint32_t m_dispersive;
+
+public:
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SpecularBSDF() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SpecularBSDF(
+        const SampledSpectrum &etaExt, const SampledSpectrum &etaInt, bool dispersive) :
+        m_etaExt(etaExt), m_etaInt(etaInt), m_dispersive(dispersive) {}
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void getSurfaceParameters(
+        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const
+    {
+        *diffuseReflectance = SampledSpectrum::Zero();
+        *specularReflectance = SampledSpectrum::Zero();
+        *roughness = 0.0f;
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDHReflectanceEstimate(
+        const shared::BSDFQuery &query) const
+    {
+        return SampledSpectrum::One();
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
+        using namespace shared;
+        constexpr DirectionType type =
+            DirectionType::Reflection() | DirectionType::Delta0D();
+        return type.matches(dirType);
+    }
+
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleF(
+        const shared::BSDFQuery &query, const shared::BSDFSample &sample,
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult = nullptr) const
+    {
+        using namespace shared;
+
+        if (revResult)
+            revResult->dirPDensity = 0.0f;
+
+        const bool entering = query.dirLocal.z >= 0.0f;
+
+        const SampledSpectrum &eEnter = entering ? m_etaExt : m_etaInt;
+        const SampledSpectrum &eExit = entering ? m_etaInt : m_etaExt;
+        const FresnelDielectric fresnel(eEnter, eExit);
+
+        const Vector3D dirV = entering ? query.dirLocal : -query.dirLocal;
+
+        const SampledSpectrum F = fresnel.evaluate(dirV.z);
+        const float reflectProb = F.importance(query.wlHint);
+        const float uComp = sample.uDir[1];
+        if (uComp < reflectProb) {
+            if (dirV.z == 0.0f) {
+                result->dirPDensity = 0.0f;
+                return SampledSpectrum::Zero();
+            }
+            const Vector3D dirL = Vector3D(-dirV.x, -dirV.y, dirV.z);
+            result->dirLocal = entering ? dirL : -dirL;
+            result->dirPDensity = reflectProb;
+            result->sampledType = DirectionType::Reflection() | DirectionType::Delta0D();
+            const SampledSpectrum ret = F * (1.0f / std::fabs(dirV.z));
+
+            if (revResult) {
+                revResult->fsValue = ret;
+                revResult->dirPDensity = result->dirPDensity;
+            }
+
+            return ret;
+        }
+        else {
+            const float sinEnter2 = 1.0f - dirV.z * dirV.z;
+            const float recRelIOR = eEnter[query.wlHint] / eExit[query.wlHint];// reciprocal of relative IOR.
+            const float sinExit2 = recRelIOR * recRelIOR * sinEnter2;
+
+            if (sinExit2 >= 1.0f) {
+                result->dirPDensity = 0.0f;
+                return SampledSpectrum::Zero();
+            }
+            const float cosExit = std::sqrt(std::fmax(0.0f, 1.0f - sinExit2));
+            const Vector3D dirL = Vector3D(recRelIOR * -dirV.x, recRelIOR * -dirV.y, -cosExit);
+            result->dirLocal = entering ? dirL : -dirL;
+            result->dirPDensity = (1.0f - reflectProb);
+            result->sampledType =
+                DirectionType::Transmission() | DirectionType::Delta0D() |
+                (m_dispersive ? DirectionType::Dispersive() : DirectionType());
+
+            SampledSpectrum ret = SampledSpectrum::Zero();
+            ret[query.wlHint] = (1.0f - F[query.wlHint]);
+
+            if (revResult) {
+                float revSqueezeFactor = 1.0f;
+                if (static_cast<TransportMode>(query.transportMode) == TransportMode::Importance)
+                    revSqueezeFactor = pow2(eExit[query.wlHint] / eEnter[query.wlHint]);
+                SampledSpectrum revRet = ret;
+                revRet[query.wlHint] *= revSqueezeFactor / std::fabs(query.dirLocal.z);
+                revResult->fsValue = revRet;
+                revResult->dirPDensity = revSqueezeFactor * result->dirPDensity;
+            }
+
+            float squeezeFactor = 1.0f;
+            if (static_cast<TransportMode>(query.transportMode) == TransportMode::Radiance)
+                squeezeFactor *= pow2(eEnter[query.wlHint] / eExit[query.wlHint]);
+            ret[query.wlHint] *= squeezeFactor / std::fabs(cosExit);
+            result->dirPDensity *= squeezeFactor;
+
+            return ret;
+        }
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        SampledSpectrum* revValue = nullptr) const
+    {
+        if (revValue)
+            *revValue = SampledSpectrum::Zero();
+        return SampledSpectrum::Zero();
+    }
+    CUDA_DEVICE_FUNCTION CUDA_INLINE float evaluatePDF(
+        const shared::BSDFQuery &query, const Vector3D &vSampled,
+        float* revValue = nullptr) const
+    {
+        if (revValue)
+            *revValue = 0.0f;
+        return 0.0f;
+    }
+};
+
+template<>
+CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<SpecularBSDF>(
+    const shared::SurfaceMaterial &matData,
+    TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags /*flags*/)
+{
+    const auto &mat = reinterpret_cast<const shared::SpecularScatteringSurfaceMaterial &>(matData.body);
+    SampledSpectrum etaExt;
+    SampledSpectrum etaInt;
+    for (uint32_t i = 0; i < NumSpectralSamples; ++i) {
+        etaExt[i] = calcIor(mat.iorExt, mat.abbeNumExt, wls[i]);
+        etaInt[i] = calcIor(mat.iorInt, mat.abbeNumInt, wls[i]);
+    }
+    auto &bsdfBody = *reinterpret_cast<SpecularBSDF*>(bodyData);
+    bsdfBody = SpecularBSDF(etaExt, etaInt, !wls.singleIsSelected());
+}
+
+
+
 // DichromaticBRDFのDirectional-Hemispherical Reflectanceを事前計算して
 // テクスチャー化した結果をフィッティングする。
 // Diffuse、Specular成分はそれぞれ
@@ -2293,65 +2519,75 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<SimplePBR_BRDF>(
 #define DEFINE_BSDF_CALLABLES(BSDFType) \
     RT_CALLABLE_PROGRAM void RT_DC_NAME(BSDFType ## _getSurfaceParameters)(\
         const uint32_t* data,\
-        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) {\
+        SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness)\
+    {\
         const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.getSurfaceParameters(diffuseReflectance, specularReflectance, roughness);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _getSurfaceParameters);\
     RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _evaluateDHReflectanceEstimate)(\
-        const uint32_t* data, const shared::BSDFQuery &query) {\
+        const uint32_t* data, const shared::BSDFQuery &query)\
+    {\
         const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.evaluateDHReflectanceEstimate(query);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluateDHReflectanceEstimate);\
     RT_CALLABLE_PROGRAM bool RT_DC_NAME(BSDFType ## _matches)(\
-        const uint32_t* data, shared::DirectionType dirType) {\
+        const uint32_t* data, shared::DirectionType dirType)\
+    {\
         const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.matches(dirType);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _matches);\
     RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _sampleF)(\
         const uint32_t* data, const shared::BSDFQuery &query, const shared::BSDFSample &sample,\
-        shared::BSDFQueryResult* result) {\
+        shared::BSDFQueryResult* result)\
+    {\
         const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.sampleF(query, sample, result);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _sampleF);\
     RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _sampleFWithRev)(\
         const uint32_t* data, const shared::BSDFQuery &query, const shared::BSDFSample &sample,\
-        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult) {\
+        shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult)\
+    {\
         const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.sampleF(query, sample, result, revResult);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _sampleFWithRev);\
     RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _evaluateF)(\
-        const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled) {\
+        const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled)\
+    {\
         const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.evaluateF(query, vSampled);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluateF);\
     RT_CALLABLE_PROGRAM SampledSpectrum RT_DC_NAME(BSDFType ## _evaluateFWithRev)(\
         const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled,\
-        SampledSpectrum* revValue) {\
+        SampledSpectrum* revValue)\
+    {\
         const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.evaluateF(query, vSampled, revValue);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluateFWithRev);\
     RT_CALLABLE_PROGRAM float RT_DC_NAME(BSDFType ## _evaluatePDF)(\
-        const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled) {\
+        const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled)\
+    {\
         const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.evaluatePDF(query, vSampled);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluatePDF);\
     RT_CALLABLE_PROGRAM float RT_DC_NAME(BSDFType ## _evaluatePDFWithRev)(\
         const uint32_t* data, const shared::BSDFQuery &query, const Vector3D &vSampled,\
-        float* revValue) {\
+        float* revValue)\
+    {\
         const auto &bsdf = *reinterpret_cast<const BSDFType*>(data);\
         return bsdf.evaluatePDF(query, vSampled, revValue);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(BSDFType ## _evaluatePDFWithRev);
 
 DEFINE_BSDF_CALLABLES(LambertBRDF);
+DEFINE_BSDF_CALLABLES(SpecularBSDF);
 DEFINE_BSDF_CALLABLES(DichromaticBRDF);
 
 #undef DEFINE_SETUP_BSDF_CALLABLE
@@ -2359,12 +2595,14 @@ DEFINE_BSDF_CALLABLES(DichromaticBRDF);
 #define DEFINE_SETUP_BSDF_CALLABLE(BSDFType) \
     RT_CALLABLE_PROGRAM void RT_DC_NAME(setup ## BSDFType)(\
         const shared::SurfaceMaterial &matData,\
-        TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags flags) {\
+        TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags flags)\
+    {\
         setupBSDFBody<BSDFType>(matData, texCoord, wls, bodyData, flags);\
     }\
     CUDA_DECLARE_CALLABLE_PROGRAM_POINTER(setup ## BSDFType)
 
 DEFINE_SETUP_BSDF_CALLABLE(LambertBRDF);
+DEFINE_SETUP_BSDF_CALLABLE(SpecularBSDF);
 DEFINE_SETUP_BSDF_CALLABLE(DichromaticBRDF);
 DEFINE_SETUP_BSDF_CALLABLE(SimplePBR_BRDF);
 

@@ -593,6 +593,8 @@ void Scene::checkLightInstDistribution(CUdeviceptr lightInstDistAddr) {
 
 uint32_t LambertianSurfaceMaterial::s_procSetSlot;
 
+uint32_t SpecularScatteringSurfaceMaterial::s_procSetSlot;
+
 uint32_t SimplePBRSurfaceMaterial::s_procSetSlot;
 
 

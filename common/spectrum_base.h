@@ -251,4 +251,17 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr RealType calcLuminance(
     return 0.0f;
 }
 
+// http://www.wiki.luxcorerender.org/Glass_Material_IOR_and_Dispersion
+template <typename RealType>
+CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr RealType calcIor(
+    const RealType ior_nd, const RealType abbeNum_vd, const RealType lambda)
+{
+    // d = 587.56 nm, F = 486.13 nm, C = 656.27 nm
+    const RealType B = (ior_nd - 1) / abbeNum_vd * RealType(0.52);
+    const RealType A = ior_nd - B * RealType(2.897);
+
+    const RealType lambdaIn_micrometer = lambda * RealType(1e-3);
+    return A + B / pow2(lambdaIn_micrometer);
+}
+
 } // namespace rtc10

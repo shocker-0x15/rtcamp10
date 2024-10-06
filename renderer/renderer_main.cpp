@@ -1370,6 +1370,7 @@ int32_t mainFunc(int32_t argc, const char* argv[]) {
     g_gpuEnv.initialize();
 
     LambertianSurfaceMaterial::setBSDFProcedureSet();
+    SpecularScatteringSurfaceMaterial::setBSDFProcedureSet();
     SimplePBRSurfaceMaterial::setBSDFProcedureSet();
 
     g_gpuEnv.setupDeviceData();
