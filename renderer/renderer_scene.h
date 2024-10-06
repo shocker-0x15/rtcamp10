@@ -424,7 +424,8 @@ public:
 
     void set(
         float iorExt, float abbeNumExt,
-        float iorInt, float abbeNumInt) {
+        float iorInt, float abbeNumInt)
+    {
         m_iorExt = iorExt;
         m_abbeNumExt = abbeNumExt;
         m_iorInt = iorInt;
@@ -445,7 +446,7 @@ public:
         body.iorInt = m_iorInt;
         body.abbeNumInt = m_abbeNumInt;
         deviceData->bsdfProcSetSlot = s_procSetSlot;
-        deviceData->setupBSDFBody = CallableProgram_setupLambertBRDF;
+        deviceData->setupBSDFBody = CallableProgram_setupSpecularBSDF;
 
         m_dirty = false;
         return true;

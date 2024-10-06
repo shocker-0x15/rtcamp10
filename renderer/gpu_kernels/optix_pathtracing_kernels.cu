@@ -31,6 +31,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
         screenPos,
         &rayOrigin, &We0, &areaPDens,
         &rayDirection, &We1, &dirPDens, &cosX0);
+    bool deltaSampled = false;
 
     float wlPDensity;
     auto wls = WavelengthSamples::createWithEqualOffsets(rng.getFloat0cTo1o(), rng.getFloat0cTo1o(), &wlPDensity);
@@ -105,7 +106,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
                     SpectrumType::LightSource, ColorSpace::Rec709_D65,
                     texValue.x, texValue.y, texValue.z).evaluate(wls);
                 float misWeight = 1.0f;
-                if (pathLength > 1) {
+                if (pathLength > 1 && !deltaSampled) {
                     float dist2 = squaredDistance(rayOrigin, interPt.position);
                     float lightPDensity = interPt.asSurf.hypAreaPDensity * dist2 / vOutLocal.z;
                     float bsdfPDensity = dirPDens;
@@ -148,6 +149,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
         SampledSpectrum fsValue = bsdf.sampleF(bsdfQuery, bsdfSample, &bsdfResult);
         if (bsdfResult.dirPDensity == 0.0f)
             break; // sampling failed.
+        if (bsdfResult.sampledType.isDispersive() && !wls.singleIsSelected()) {
+            bsdfResult.dirPDensity /= SampledSpectrum::NumComponents();
+            wls.setSingleIsSelected();
+        }
         rayDirection = interPt.fromLocal(bsdfResult.dirLocal);
         float dotSGN = interPt.calcDot(rayDirection);
         SampledSpectrum localThroughput = fsValue * (std::fabs(dotSGN) / bsdfResult.dirPDensity);
@@ -159,6 +164,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
 
         rayOrigin = interPt.calcOffsetRayOrigin(dotSGN > 0.0f);
         dirPDens = bsdfResult.dirPDensity;
+        deltaSampled = bsdfResult.sampledType.isDelta();
     }
 
     plp.s->rngBuffer.write(launchIndex, rng);

@@ -995,7 +995,7 @@ struct BSDFQuery {
     Vector3D dirLocal;
     Normal3D geometricNormalLocal;
     uint32_t transportMode : 2;
-    uint32_t wlHint : 1;
+    uint32_t wlHint : 4;
 
     CUDA_COMMON_FUNCTION BSDFQuery() {}
     CUDA_COMMON_FUNCTION BSDFQuery(
@@ -1723,8 +1723,7 @@ public:
 
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
         using namespace shared;
-        constexpr DirectionType type =
-            DirectionType::Reflection() | DirectionType::LowFreq();
+        constexpr DirectionType type = DirectionType::LowFreqReflection();
         return type.matches(dirType);
     }
 
@@ -1732,10 +1731,12 @@ public:
         const shared::BSDFQuery &query, const shared::BSDFSample &sample,
         shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult = nullptr) const
     {
+        using namespace shared;
         result->dirLocal = cosineSampleHemisphere(sample.uDir[0], sample.uDir[1]);
         const float oneOverPi = 1.0f / pi_v<float>;
         result->dirPDensity = result->dirLocal.z * oneOverPi;
         result->dirLocal.z *= query.dirLocal.z >= 0 ? 1 : -1;
+        result->sampledType = DirectionType::LowFreqReflection();
         const SampledSpectrum fsValue = m_reflectance * oneOverPi;
         if (revResult) {
             revResult->fsValue = fsValue;
@@ -1874,7 +1875,7 @@ public:
         SampledSpectrum* diffuseReflectance, SampledSpectrum* specularReflectance, float* roughness) const
     {
         *diffuseReflectance = SampledSpectrum::Zero();
-        *specularReflectance = SampledSpectrum::Zero();
+        *specularReflectance = SampledSpectrum::One();
         *roughness = 0.0f;
     }
     CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum evaluateDHReflectanceEstimate(
@@ -1886,7 +1887,7 @@ public:
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
         using namespace shared;
         constexpr DirectionType type =
-            DirectionType::Reflection() | DirectionType::Delta0D();
+            DirectionType::Delta0DReflection() | DirectionType::Delta0DTransmission();
         return type.matches(dirType);
     }
 
@@ -1895,6 +1896,8 @@ public:
         shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult = nullptr) const
     {
         using namespace shared;
+
+        constexpr float coeff = 0.99f;
 
         if (revResult)
             revResult->dirPDensity = 0.0f;
@@ -1918,8 +1921,8 @@ public:
             const Vector3D dirL = Vector3D(-dirV.x, -dirV.y, dirV.z);
             result->dirLocal = entering ? dirL : -dirL;
             result->dirPDensity = reflectProb;
-            result->sampledType = DirectionType::Reflection() | DirectionType::Delta0D();
-            const SampledSpectrum ret = F * (1.0f / std::fabs(dirV.z));
+            result->sampledType = DirectionType::Delta0DReflection();
+            const SampledSpectrum ret = F * (coeff / std::fabs(dirV.z));
 
             if (revResult) {
                 revResult->fsValue = ret;
@@ -1942,11 +1945,11 @@ public:
             result->dirLocal = entering ? dirL : -dirL;
             result->dirPDensity = (1.0f - reflectProb);
             result->sampledType =
-                DirectionType::Transmission() | DirectionType::Delta0D() |
+                DirectionType::Delta0DTransmission() |
                 (m_dispersive ? DirectionType::Dispersive() : DirectionType());
 
             SampledSpectrum ret = SampledSpectrum::Zero();
-            ret[query.wlHint] = (1.0f - F[query.wlHint]);
+            ret[query.wlHint] = coeff * (1.0f - F[query.wlHint]);
 
             if (revResult) {
                 float revSqueezeFactor = 1.0f;
@@ -1997,6 +2000,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<SpecularBSDF>(
         etaExt[i] = calcIor(mat.iorExt, mat.abbeNumExt, wls[i]);
         etaInt[i] = calcIor(mat.iorInt, mat.abbeNumInt, wls[i]);
     }
+    //printf(
+    //    "wls: (" SPDFMT "), etaExt: (" SPDFMT "), etaInt: (" SPDFMT ")\n",
+    //    spdprint(wls), spdprint(etaExt), spdprint(etaInt));
     auto &bsdfBody = *reinterpret_cast<SpecularBSDF*>(bodyData);
     bsdfBody = SpecularBSDF(etaExt, etaInt, !wls.singleIsSelected());
 }
@@ -2184,7 +2190,7 @@ public:
     CUDA_DEVICE_FUNCTION CUDA_INLINE bool matches(shared::DirectionType dirType) const {
         using namespace shared;
         constexpr DirectionType type =
-            DirectionType::Reflection() | DirectionType::LowFreq() | DirectionType::HighFreq();
+            DirectionType::LowFreqReflection() | DirectionType::HighFreqReflection();
         return type.matches(dirType);
     }
 
@@ -2192,6 +2198,8 @@ public:
         const shared::BSDFQuery &query, const shared::BSDFSample &sample,
         shared::BSDFQueryResult* result, shared::BSDFQueryReverseResult* revResult = nullptr) const
     {
+        using namespace shared;
+
         if (revResult)
             revResult->dirPDensity = 0.0f;
 
@@ -2257,6 +2265,8 @@ public:
             specularDirPDens = commonPDFTerm * ggx.evaluatePDF(dirV, m);
 
             D = ggx.evaluate(m);
+
+            result->sampledType = DirectionType::LowFreqReflection();
         }
         else {
             // JP: スペキュラー層のマイクロファセット分布からサンプルする。
@@ -2276,6 +2286,8 @@ public:
             // JP: 同じ方向サンプルをコサイン分布からサンプルする確率密度を求める。
             // EN: calculate PDF to generate the sampled direction from the cosine distribution.
             diffuseDirPDens = dirL.z / pi_v<float>;
+
+            result->sampledType = DirectionType::HighFreqReflection();
         }
 
         const float oneMinusDotLH5 = pow5(1 - dotLH);

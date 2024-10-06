@@ -321,10 +321,12 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
         const SampledSpectrum fsValue = bsdf.sampleF(bsdfQuery, bsdfSample, &bsdfResult, &bsdfRevResult);
         if (bsdfResult.dirPDensity == 0.0f)
             break; // sampling failed.
+        if (bsdfResult.sampledType.isDispersive() && !wls.singleIsSelected())
+            wls.setSingleIsSelected();
         rayDir = interPt.fromLocal(bsdfResult.dirLocal);
         secondPrevRevAreaPDens = bsdfRevResult.dirPDensity * cosTerm / lastDist2;
 
-        const float dotSGN = interPt.calcAbsDot(rayDir);
+        const float dotSGN = interPt.calcDot(rayDir);
         cosTerm = std::fabs(dotSGN);
         const SampledSpectrum localThroughput = fsValue * (cosTerm / bsdfResult.dirPDensity);
 
@@ -503,28 +505,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
     // EN: Don't consider the implicit lens sampling strategy.
     /*float forwardDirDensityL = */lBsdf.evaluatePDF(lBsdfQuery, lConRayDirLocal, &lBackwardDirPDens);
     //float forwardAreaDensityL = forwardDirDensityL * eCosTerm * recSquaredConDist;
-    //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-    //    printf(
-    //        "eP: (" V3FMT "), lp: (" V3FMT ")\n",
-    //        v3print(eInterPt.position), v3print(lInterPt.position));
-    //    printf(
-    //        "dirL, (" V3FMT "), smpL: (" V3FMT ")\n",
-    //        v3print(lBsdfQuery.dirLocal), v3print(lConRayDirLocal));
-    //    printf("recDist2: %g\n", recConDist2);
-    //    printf("lBkDirP: %g\n", lBackwardDirPDens);
-    //}
     if constexpr (includeRrProbability) {
         const SampledSpectrum localThroughput = lBackwardFs *
             (std::fabs(dot(lBsdfQuery.dirLocal, lGeomNormalLocal)) / lBackwardDirPDens);
         const float rrProb = std::fmin(localThroughput.importance(wls.selectedLambdaIndex()), 1.0f);
         lBackwardDirPDens *= rrProb;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf("lBkRrProb: %g\n", rrProb);
-        //}
     }
-    //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-    //    printf("lBkCvt: %g\n", lVtx.backwardConversionFactor);
-    //}
     float lBackwardAreaPDens = lBackwardDirPDens * lVtx.backwardConversionFactor;
     if (lVtx.prevDeltaSampled)
         lBackwardAreaPDens = 0;
@@ -543,12 +529,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
         float dist2;
         onScreen = camera.calcScreenPosition(
             lInterPt.position, &eForwardFs, &screenPos, &eForwardDirPDens, &cosTerm, &dist2);
-    }    
-    //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-    //    printf(
-    //        "fDirP: %g, cos: %g\n",
-    //        eForwardDirPDens, lCosTerm);
-    //}
+    }
     const float eForwardAreaPDens = eForwardDirPDens * lCosTerm * recConDist2;
     //if (lInterPt.isPoint) // Delta function in the positional density (e.g. point light)
     //    eForwardAreaPDens = 0;
@@ -557,9 +538,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
     float lPartialDenomMisWeight;
     {
         float probRatioToFirst = lVtx.secondPrevProbRatioToFirst;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf("totalRatio: %g\n", probRatioToFirst);
-        //}
 
         const bool l2ndLastSegIsValidConnection =
             (!lVtx.deltaSampled && !lVtx.prevDeltaSampled) &&
@@ -570,14 +548,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
             (lVtx.secondPrevPartialDenomMisWeight + (l2ndLastSegIsValidConnection ? 1 : 0));
         if (lVtx.pathLength > 0)
             probRatioToFirst *= lastTo2ndLastProbRatio;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf(
-        //        "lBkAreaP: %g, lPrevP: %g\n",
-        //        lBackwardAreaPDens, lVtx.prevProbDensity);
-        //    printf("ratio: %g\n", lastTo2ndLastProbRatio);
-        //    printf("totalRatio: %g\n", probRatioToFirst);
-        //    printf("partDenomW: %g\n", lPartialDenomMisWeight);
-        //}
 
         const bool l1stLastSegIsValidConnection =
             (/*lBsdf.hasNonDelta() &&*/ !lVtx.deltaSampled) &&
@@ -587,22 +557,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
             pow2(curTo1stLastProbRatio) *
             (lPartialDenomMisWeight + (l1stLastSegIsValidConnection ? 1 : 0));
         probRatioToFirst *= curTo1stLastProbRatio;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf(
-        //        "eFwAreaP: %g, lP: %g\n",
-        //        eForwardAreaPDens, lVtx.probDensity);
-        //    printf("ratio: %g\n", curTo1stLastProbRatio);
-        //    printf("totalRatio: %g\n", probRatioToFirst);
-        //    printf("partDenomW: %g\n", lPartialDenomMisWeight);
-        //}
 
         // JP: Implicit Light Sampling戦略にはLight Vertex Cacheからのランダムな選択確率は含まれない。
         // EN: Implicit light sampling strategy doesn't contain a probability to
         //     randomly select from the light vertex cache.
         lPartialDenomMisWeight += pow2(probRatioToFirst / lVtxProb);
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf("partDenomW: %g\n", lPartialDenomMisWeight);
-        //}
     }
 
     const SampledSpectrum conTerm = lForwardFs * scalarConTerm * eForwardFs;
@@ -1087,10 +1046,12 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(eyePaths)() {
         const SampledSpectrum fsValue = bsdf.sampleF(bsdfQuery, bsdfSample, &bsdfResult, &bsdfRevResult);
         if (bsdfResult.dirPDensity == 0.0f)
             break; // sampling failed.
+        if (bsdfResult.sampledType.isDispersive() && !wls.singleIsSelected())
+            wls.setSingleIsSelected();
         rayDir = eInterPt.fromLocal(bsdfResult.dirLocal);
         secondPrevRevAreaPDens = bsdfRevResult.dirPDensity * cosTerm / lastDist2;
 
-        const float dotSGN = eInterPt.calcAbsDot(rayDir);
+        const float dotSGN = eInterPt.calcDot(rayDir);
         cosTerm = std::fabs(dotSGN);
         const SampledSpectrum localThroughput = fsValue * (cosTerm / bsdfResult.dirPDensity);
 

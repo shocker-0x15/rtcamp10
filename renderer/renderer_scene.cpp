@@ -1189,8 +1189,8 @@ static Ref<cudau::Array> createEmittanceTexture(
 static constexpr bool forceLambertBRDF = false;
 
 static Ref<SurfaceMaterial> createLambertianMaterial(
-    const std::filesystem::path &reflectancePath, const RGBSpectrum &immReflectance) {
-
+    const std::filesystem::path &reflectancePath, const RGBSpectrum &immReflectance)
+{
     bool needsDegamma = false;
 
     Ref<cudau::Array> arrayReflectance;
@@ -1215,6 +1215,18 @@ static Ref<SurfaceMaterial> createLambertianMaterial(
     g_scene.allocateSurfaceMaterial(ret);
 
     ret->set(texReflectance);
+
+    return ret;
+}
+
+static Ref<SurfaceMaterial> createSpecularScatteringMaterial(
+    const float iorExt, const float abbeNumExt,
+    const float iorInt, const float abbeNumInt)
+{
+    auto ret = std::make_shared<SpecularScatteringSurfaceMaterial>();
+    g_scene.allocateSurfaceMaterial(ret);
+
+    ret->set(iorExt, abbeNumExt, iorInt, abbeNumInt);
 
     return ret;
 }
@@ -1306,6 +1318,7 @@ struct GeometryGroupInstance {
 
 static void loadTriangleMesh(
     const std::filesystem::path &filePath, const Matrix4x4 &preTransform,
+    const Ref<SurfaceMaterial> &overrideSurfMat, 
     std::vector<GeometryGroupInstance>* geomGroupInsts) {
     hpprintf("Reading: %s ... ", filePath.string().c_str());
     fflush(stdout);
@@ -1548,7 +1561,10 @@ static void loadTriangleMesh(
         auto geom = std::make_shared<TriangleMeshGeometry>();
         g_scene.allocateGeometryInstance(geom);
 
-        geom->set(vertexBuffer, triangles, normalMap.texture, normalMap.bumpMapType, surfMat);
+        geom->set(
+            vertexBuffer, triangles,
+            normalMap.texture, normalMap.bumpMapType,
+            overrideSurfMat ? overrideSurfMat : surfMat);
 
         geometries.push_back(geom);
     }
@@ -1683,6 +1699,15 @@ static std::regex makeRegex(const std::vector<std::string> &tokens) {
     return std::move(std::regex(pattern));
 }
 
+static std::regex makeConditionalRegex(const std::vector<std::string> &tokens) {
+    const char* reSpace = R"([ \t]+?)";
+    std::string pattern = tokens[0];
+    for (uint32_t i = 1; i < tokens.size(); ++i)
+        pattern += reSpace + tokens[i];
+    pattern += reSpace;
+    return std::move(std::regex(pattern));
+}
+
 static std::smatch testRegex(
     const std::regex &re, const char* cmd, uint32_t lineIndex, const std::string &line) {
     std::smatch m;
@@ -1691,6 +1716,18 @@ static std::smatch testRegex(
         "failed to parse \"%s\" command: %s",
         cmd, line.c_str());
     return std::move(m);
+}
+
+static bool tryRegex(
+    const std::regex &re, const char* cmd, uint32_t lineIndex, const std::string &line,
+    std::smatch* res)
+{
+    std::smatch m;
+    if (std::regex_search(line, m, re)) {
+        *res = std::move(m);
+        return true;
+    }
+    return false;
 }
 
 struct CameraInfo {
@@ -1705,6 +1742,7 @@ struct MeshInfo {
     struct File {
         std::filesystem::path path;
         float scale;
+        std::string overrideMat;
     };
     struct Rectangle {
         float dimX;
@@ -1717,6 +1755,17 @@ struct MeshInfo {
         File,
         Rectangle
     > body;
+};
+
+struct MaterialInfo {
+    struct SpecularScattering {
+        float iorExt;
+        float abbeNumExt;
+        float iorInt;
+        float abbeNumInt;
+    };
+    std::variant<
+        SpecularScattering> body;
 };
 
 struct InstanceInfo {
@@ -1740,6 +1789,7 @@ struct SceneLoadingContext {
     uint32_t fps;
 
     std::map<std::string, MeshInfo> meshInfos;
+    std::map<std::string, MaterialInfo> matInfos;
     std::map<std::string, InstanceInfo> instInfos;
     std::map<std::string, CameraInfo> camInfos;
     std::vector<ActiveCameraInfo> activeCamInfos;
@@ -1747,6 +1797,7 @@ struct SceneLoadingContext {
 
 using lineFunc = std::function<void(SceneLoadingContext &context)>;
 std::map<std::string, lineFunc> processors = {
+    // image
     {
         "image",
         [](SceneLoadingContext &context) {
@@ -1764,6 +1815,7 @@ std::map<std::string, lineFunc> processors = {
             context.imageHeight = static_cast<uint32_t>(h);
         }
     },
+    // time
     {
         "time",
         [](SceneLoadingContext &context) {
@@ -1782,6 +1834,7 @@ std::map<std::string, lineFunc> processors = {
             context.fps = static_cast<uint32_t>(std::stoi(m[3].str().c_str()));
         }
     },
+    // camera
     {
         "camera",
         [](SceneLoadingContext &context) {
@@ -1807,6 +1860,7 @@ std::map<std::string, lineFunc> processors = {
             context.camInfos[camName] = camInfo;
         }
     },
+    // fovy
     {
         "fovy",
         [](SceneLoadingContext &context) {
@@ -1828,6 +1882,7 @@ std::map<std::string, lineFunc> processors = {
             context.camInfos.at(camName).nextKeyFovY = fovY;
         }
     },
+    // lookat
     {
         "lookat",
         [](SceneLoadingContext &context) {
@@ -1856,6 +1911,7 @@ std::map<std::string, lineFunc> processors = {
                 std::stof(m[10].str().c_str()));
         }
     },
+    // cam-addkey
     {
         "cam-addkey",
         [](SceneLoadingContext &context) {
@@ -1884,6 +1940,7 @@ std::map<std::string, lineFunc> processors = {
             camInfo.keyStates.push_back(state);
         }
     },
+    // active-cam
     {
         "active-cam",
         [](SceneLoadingContext &context) {
@@ -1908,14 +1965,25 @@ std::map<std::string, lineFunc> processors = {
             context.activeCamInfos.push_back(activeCamInfo);
         }
     },
+    // mesh
     {
         "mesh",
         [](SceneLoadingContext &context) {
             static const char* cmd = "mesh";
-            static const std::regex re = makeRegex({cmd, reQuotedPath, reReal, reString});
-            std::smatch m = testRegex(re, cmd, context.lineIndex, context.line);
+            static const std::regex re = makeRegex({cmd, reQuotedPath, reReal, reString, reString });
+            std::smatch m;
+            std::string matName;
+            std::string meshName;
+            if (tryRegex(re, cmd, context.lineIndex, context.line, &m)) {
+                matName = m[3].str();
+                meshName = m[4].str();
+            }
+            else {
+                static const std::regex re2 = makeRegex({ cmd, reQuotedPath, reReal, reString });
+                m = testRegex(re2, cmd, context.lineIndex, context.line);
+                meshName = m[3].str();
+            }
 
-            std::string meshName = m[3].str();
             throwRuntimeErrorAtLine(
                 !context.meshInfos.contains(meshName), context.lineIndex + 1,
                 "Mesh %s has been already created.",
@@ -1926,7 +1994,13 @@ std::map<std::string, lineFunc> processors = {
                 meshFilePath = context.sceneFileDir / meshFilePath;
             throwRuntimeErrorAtLine(
                 std::filesystem::exists(meshFilePath), context.lineIndex + 1,
-                "Mesh %s does not exist.", meshFilePath.string().c_str());
+                "Mesh file %s does not exist.", meshFilePath.string().c_str());
+            if (matName != "") {
+                throwRuntimeErrorAtLine(
+                    context.matInfos.contains(matName), context.lineIndex + 1,
+                    "Material %s does not exist.",
+                    meshName.c_str());
+            }
             float scale = std::stof(m[2].str().c_str());
             throwRuntimeErrorAtLine(
                 scale > 0.0f, context.lineIndex + 1,
@@ -1935,9 +2009,11 @@ std::map<std::string, lineFunc> processors = {
             MeshInfo::File meshInfo;
             meshInfo.path = meshFilePath;
             meshInfo.scale = scale;
+            meshInfo.overrideMat = matName;
             context.meshInfos[meshName].body = meshInfo;
         }
     },
+    // rect
     {
         "rect",
         [](SceneLoadingContext &context) {
@@ -1964,6 +2040,7 @@ std::map<std::string, lineFunc> processors = {
             context.meshInfos[meshName].body = rectInfo;
         }
     },
+    // emittance
     {
         "emittance",
         [](SceneLoadingContext &context) {
@@ -1999,6 +2076,7 @@ std::map<std::string, lineFunc> processors = {
             rectInfo.emitterType = emitterType;
         }
     },
+    // inst
     {
         "inst",
         [](SceneLoadingContext &context) {
@@ -2030,6 +2108,7 @@ std::map<std::string, lineFunc> processors = {
             context.instInfos[instName] = instInfo;
         }
     },
+    // scale
     {
         "scale",
         [](SceneLoadingContext &context) {
@@ -2046,6 +2125,7 @@ std::map<std::string, lineFunc> processors = {
             context.instInfos.at(instName).nextKeyScale = std::stof(m[2].str().c_str());
         }
     },
+    // rotate
     {
         "rotate",
         [](SceneLoadingContext &context) {
@@ -2066,6 +2146,7 @@ std::map<std::string, lineFunc> processors = {
                 std::stof(m[4].str().c_str()));
         }
     },
+    // orient
     {
         "orient",
         [](SceneLoadingContext &context) {
@@ -2095,6 +2176,7 @@ std::map<std::string, lineFunc> processors = {
             context.instInfos.at(instName).nextKeyOrientation = q;
         }
     },
+    // trans
     {
         "trans",
         [](SceneLoadingContext &context) {
@@ -2116,6 +2198,7 @@ std::map<std::string, lineFunc> processors = {
             context.instInfos.at(tgtName).nextKeyPosition = position;
         }
     },
+    // inst-addkey
     {
         "inst-addkey",
         [](SceneLoadingContext &context) {
@@ -2143,6 +2226,7 @@ std::map<std::string, lineFunc> processors = {
             instInfo.keyStates.push_back(state);
         }
     },
+    // cyclic
     {
         "cyclic",
         [](SceneLoadingContext &context) {
@@ -2160,6 +2244,52 @@ std::map<std::string, lineFunc> processors = {
             instInfo.hasCyclicAnim = true;
         }
     },
+    // material
+    {
+        "material",
+        [](SceneLoadingContext &context) {
+            static const char* cmd = "material";
+            static const std::regex re = makeConditionalRegex({cmd, reString});
+            std::smatch m = testRegex(re, cmd, context.lineIndex, context.line);
+
+            static const std::set<std::string> matTypeNames = {
+                "lambert", "specularscattering", "simplepbr"
+            };
+            std::string matTypeName = m[1].str();
+            throwRuntimeErrorAtLine(
+                matTypeNames.contains(matTypeName), context.lineIndex + 1,
+                "Invalid material type %s.",
+                matTypeName.c_str());
+
+            std::string matName;
+            MaterialInfo matInfo;
+            if (matTypeName == "lambert") {
+                Assert_NotImplemented();
+            }
+            else if (matTypeName == "specularscattering") {
+                static const std::regex reMat = makeRegex({
+                    cmd, reString, reReal, reReal, reReal, reReal, reString });
+                m = testRegex(reMat, cmd, context.lineIndex, context.line); 
+                matInfo.body = MaterialInfo::SpecularScattering();
+                auto &body = std::get<MaterialInfo::SpecularScattering>(matInfo.body);
+                body.iorExt = std::stof(m[2].str().c_str());
+                body.abbeNumExt = std::stof(m[3].str().c_str());
+                body.iorInt = std::stof(m[4].str().c_str());
+                body.abbeNumInt = std::stof(m[5].str().c_str());
+                matName = m[6].str();
+            }
+            else if (matTypeName == "simplepbr") {
+                Assert_NotImplemented();
+            }
+
+            throwRuntimeErrorAtLine(
+                !context.matInfos.contains(matName), context.lineIndex + 1,
+                "Material %s has been already created.",
+                matName.c_str());
+
+            context.matInfos[matName] = matInfo;
+        }
+    }
 };
 
 
@@ -2251,6 +2381,21 @@ void loadScene(const std::filesystem::path &sceneFilePath, RenderConfigs* render
         });
     renderConfigs->activeCameraInfos = std::move(context.activeCamInfos);
 
+    // JP: マテリアルデータの作成。
+    std::unordered_map<std::string, Ref<SurfaceMaterial>> matNameToSurfMats;
+    for (auto &it : context.matInfos) {
+        const std::string &matName = it.first;
+        const MaterialInfo &matInfo = it.second;
+        Ref<SurfaceMaterial> surfMat;
+        if (std::holds_alternative<MaterialInfo::SpecularScattering>(matInfo.body)) {
+            const auto &body = std::get<MaterialInfo::SpecularScattering>(matInfo.body);
+            surfMat = createSpecularScatteringMaterial(
+                body.iorExt, body.abbeNumExt,
+                body.iorInt, body.abbeNumInt);
+        }
+        matNameToSurfMats[matName] = surfMat;
+    }
+
     // JP: メッシュデータを読み込み、テクスチャーやマテリアル、ジオメトリとジオメトリグループ
     //     を生成する。1つのメッシュデータからは複数のジオメトリグループ(とトランスフォームの組)
     //     が作られる。
@@ -2261,7 +2406,13 @@ void loadScene(const std::filesystem::path &sceneFilePath, RenderConfigs* render
         std::vector<GeometryGroupInstance> geomGroupInsts;
         if (std::holds_alternative<MeshInfo::File>(meshInfo.body)) {
             const MeshInfo::File &fileInfo = std::get<MeshInfo::File>(meshInfo.body);
-            loadTriangleMesh(fileInfo.path, scale4x4<float>(fileInfo.scale), &geomGroupInsts);
+            Ref<SurfaceMaterial> overrideSurfMat;
+            if (fileInfo.overrideMat != "") {
+                overrideSurfMat = matNameToSurfMats.at(fileInfo.overrideMat);
+            }
+            loadTriangleMesh(
+                fileInfo.path, scale4x4<float>(fileInfo.scale), overrideSurfMat,
+                &geomGroupInsts);
         }
         else if (std::holds_alternative<MeshInfo::Rectangle>(meshInfo.body)) {
             const MeshInfo::Rectangle &rectInfo = std::get<MeshInfo::Rectangle>(meshInfo.body);

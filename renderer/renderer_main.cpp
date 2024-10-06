@@ -386,6 +386,7 @@ static float computeHaltonSequence(uint32_t base, uint32_t idx) {
 }
 
 static float wavelengthRandoms[1024];
+static float singleWavelengthRandoms[1024];
 
 static int32_t runGuiApp() {
     const std::filesystem::path exeDir = getExecutableDirectory();
@@ -439,7 +440,7 @@ static int32_t runGuiApp() {
     GLFWwindow* window = glfwCreateWindow(
         static_cast<int32_t>(renderTargetSizeX * UIScaling),
         static_cast<int32_t>(renderTargetSizeY * UIScaling),
-        "RTCamp9", NULL, NULL);
+        "RTCamp10", NULL, NULL);
     glfwSetWindowUserPointer(window, nullptr);
     if (!window) {
         hpprintf("Failed to create a GLFW window.\n");
@@ -1060,9 +1061,9 @@ static int32_t runGuiApp() {
 
         //g_gpuEnv.clearLtTargetBuffer.launchWithThreadDim(
         //    curCuStream, cudau::dim3(renderTargetSizeX, renderTargetSizeY));
-        g_gpuEnv.lightTracing.setEntryPoint(LightTracingEntryPoint::lightTrace);
-        g_gpuEnv.lightTracing.optixPipeline.launch(
-            curCuStream, plpOnDevice, numLightTracingPaths, 1, 1);
+        //g_gpuEnv.lightTracing.setEntryPoint(LightTracingEntryPoint::lightTrace);
+        //g_gpuEnv.lightTracing.optixPipeline.launch(
+        //    curCuStream, plpOnDevice, numLightTracingPaths, 1, 1);
         //CUDADRV_CHECK(cuStreamSynchronize(curCuStream));
 #else
         g_gpuEnv.clearLtTargetBuffer.launchWithThreadDim(
@@ -1071,7 +1072,8 @@ static int32_t runGuiApp() {
         shared::LvcBptPassInfo lvcBptPassInfoOnHost = {};
         lvcBptPassInfoOnHost.wls = WavelengthSamples::createWithEqualOffsets(
             wavelengthRandoms[numAccumFrames % lengthof(wavelengthRandoms)],
-            u01(perFrameRng), &lvcBptPassInfoOnHost.wlPDens);
+            singleWavelengthRandoms[numAccumFrames % lengthof(wavelengthRandoms)],
+            &lvcBptPassInfoOnHost.wlPDens);
         lvcBptPassInfoOnHost.numLightVertices = 0;
         CUDADRV_CHECK(cuMemcpyHtoDAsync(
             lvcBptPassInfo.getCUdeviceptr(), &lvcBptPassInfoOnHost,
@@ -1392,8 +1394,10 @@ int32_t mainFunc(int32_t argc, const char* argv[]) {
 
     g_scene.initialize();
 
-    for (uint32_t i = 0; i < lengthof(wavelengthRandoms); ++i)
+    for (uint32_t i = 0; i < lengthof(wavelengthRandoms); ++i) {
         wavelengthRandoms[i] = computeHaltonSequence(2, i);
+        singleWavelengthRandoms[i] = computeHaltonSequence(3, i);
+    }
 
     int32_t ret;
     if (g_guiMode)

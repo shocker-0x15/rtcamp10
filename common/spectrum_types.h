@@ -13,47 +13,47 @@ struct WavelengthSamplesTemplate {
         unsigned int _singleIsSelected : 1;
     };
 
-    CUDA_DEVICE_FUNCTION WavelengthSamplesTemplate() {}
-    CUDA_DEVICE_FUNCTION WavelengthSamplesTemplate(const RealType* values) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE WavelengthSamplesTemplate() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE WavelengthSamplesTemplate(const RealType* values) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             lambdas[i] = values[i];
         _selectedLambdaIndex = 0;
         _singleIsSelected = false;
     }
-    CUDA_DEVICE_FUNCTION WavelengthSamplesTemplate(const WavelengthSamplesTemplate &wls) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE WavelengthSamplesTemplate(const WavelengthSamplesTemplate &wls) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             lambdas[i] = wls.lambdas[i];
         _selectedLambdaIndex = wls._selectedLambdaIndex;
         _singleIsSelected = wls._singleIsSelected;
     }
 
-    CUDA_DEVICE_FUNCTION RealType &operator[](uint32_t index) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE RealType &operator[](uint32_t index) {
         Assert(index < NumSpectralSamples, "\"index\" is out of range [0, %u].", NumSpectralSamples - 1);
         return lambdas[index];
     }
-    CUDA_DEVICE_FUNCTION RealType operator[](uint32_t index) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE RealType operator[](uint32_t index) const {
         Assert(index < NumSpectralSamples, "\"index\" is out of range [0, %u].", NumSpectralSamples - 1);
         return lambdas[index];
     }
 
-    CUDA_DEVICE_FUNCTION uint32_t selectedLambdaIndex() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE uint32_t selectedLambdaIndex() const {
         return _selectedLambdaIndex;
     }
-    CUDA_DEVICE_FUNCTION void setSelectedLambdaIndex(uint32_t index) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setSelectedLambdaIndex(uint32_t index) const {
         _selectedLambdaIndex = index;
     }
-    CUDA_DEVICE_FUNCTION bool singleIsSelected() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool singleIsSelected() const {
         return _singleIsSelected;
     }
-    CUDA_DEVICE_FUNCTION void setSingleIsSelected() {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE void setSingleIsSelected() {
         _singleIsSelected = true;
     }
 
-    CUDA_DEVICE_FUNCTION RealType selectedWavelength() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE RealType selectedWavelength() const {
         return lambdas[_selectedLambdaIndex];
     }
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE static WavelengthSamplesTemplate createWithEqualOffsets(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE CUDA_INLINE static WavelengthSamplesTemplate createWithEqualOffsets(
         RealType offset, RealType uLambda, RealType* PDF) {
         Assert(offset >= 0 && offset < 1, "\"offset\" must be in range [0, 1).");
         Assert(uLambda >= 0 && uLambda < 1, "\"uLambda\" must be in range [0, 1).");
@@ -66,7 +66,7 @@ struct WavelengthSamplesTemplate {
         return wls;
     }
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE static constexpr uint32_t NumComponents() {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE CUDA_INLINE static constexpr uint32_t NumComponents() {
         return NumSpectralSamples;
     }
 };
@@ -77,181 +77,181 @@ template <typename RealType, uint32_t NumSpectralSamples>
 struct SampledSpectrumTemplate {
     RealType values[NumSpectralSamples];
 
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate() {}
-    CUDA_DEVICE_FUNCTION constexpr SampledSpectrumTemplate(RealType v) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate() {}
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr SampledSpectrumTemplate(RealType v) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] = v;
     }
-    CUDA_DEVICE_FUNCTION constexpr SampledSpectrumTemplate(const RealType* vals) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE constexpr SampledSpectrumTemplate(const RealType* vals) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] = vals[i];
     }
 
 
 
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate operator+() const { return *this; };
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate operator-() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate operator+() const { return *this; };
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate operator-() const {
         RealType vals[NumSpectralSamples];
         for (int i = 0; i < NumSpectralSamples; ++i)
             vals[i] = -values[i];
         return SampledSpectrumTemplate(vals);
     }
 
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate operator+(const SampledSpectrumTemplate &c) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate operator+(const SampledSpectrumTemplate &c) const {
         RealType vals[NumSpectralSamples];
         for (int i = 0; i < NumSpectralSamples; ++i)
             vals[i] = values[i] + c.values[i];
         return SampledSpectrumTemplate(vals);
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate operator-(const SampledSpectrumTemplate &c) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate operator-(const SampledSpectrumTemplate &c) const {
         RealType vals[NumSpectralSamples];
         for (int i = 0; i < NumSpectralSamples; ++i)
             vals[i] = values[i] - c.values[i];
         return SampledSpectrumTemplate(vals);
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate operator*(const SampledSpectrumTemplate &c) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate operator*(const SampledSpectrumTemplate &c) const {
         RealType vals[NumSpectralSamples];
         for (int i = 0; i < NumSpectralSamples; ++i)
             vals[i] = values[i] * c.values[i];
         return SampledSpectrumTemplate(vals);
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate operator/(const SampledSpectrumTemplate &c) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate operator/(const SampledSpectrumTemplate &c) const {
         RealType vals[NumSpectralSamples];
         for (int i = 0; i < NumSpectralSamples; ++i)
             vals[i] = values[i] / c.values[i];
         return SampledSpectrumTemplate(vals);
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate safeDivide(const SampledSpectrumTemplate &c) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate safeDivide(const SampledSpectrumTemplate &c) const {
         RealType vals[NumSpectralSamples];
         for (int i = 0; i < NumSpectralSamples; ++i)
             vals[i] = c.values[i] > 0 ? values[i] / c.values[i] : 0.0f;
         return SampledSpectrumTemplate(vals);
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate operator*(RealType s) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate operator*(RealType s) const {
         RealType vals[NumSpectralSamples];
         for (int i = 0; i < NumSpectralSamples; ++i)
             vals[i] = values[i] * s;
         return SampledSpectrumTemplate(vals);
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate operator/(RealType s) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate operator/(RealType s) const {
         RealType vals[NumSpectralSamples];
         RealType r = 1 / s;
         for (int i = 0; i < NumSpectralSamples; ++i)
             vals[i] = values[i] * r;
         return SampledSpectrumTemplate(vals);
     }
-    CUDA_DEVICE_FUNCTION friend SampledSpectrumTemplate operator*(RealType s, const SampledSpectrumTemplate &c) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE friend SampledSpectrumTemplate operator*(RealType s, const SampledSpectrumTemplate &c) {
         RealType vals[NumSpectralSamples];
         for (int i = 0; i < NumSpectralSamples; ++i)
             vals[i] = c.values[i] * s;
         return SampledSpectrumTemplate(vals);
     }
 
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate &operator+=(const SampledSpectrumTemplate &c) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate &operator+=(const SampledSpectrumTemplate &c) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] += c.values[i];
         return *this;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate &operator-=(const SampledSpectrumTemplate &c) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate &operator-=(const SampledSpectrumTemplate &c) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] -= c.values[i];
         return *this;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate &operator*=(const SampledSpectrumTemplate &c) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate &operator*=(const SampledSpectrumTemplate &c) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] *= c.values[i];
         return *this;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate &operator/=(const SampledSpectrumTemplate &c) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate &operator/=(const SampledSpectrumTemplate &c) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] /= c.values[i];
         return *this;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate &operator*=(RealType s) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate &operator*=(RealType s) {
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] *= s;
         return *this;
     }
-    CUDA_DEVICE_FUNCTION SampledSpectrumTemplate &operator/=(RealType s) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrumTemplate &operator/=(RealType s) {
         RealType r = 1 / s;
         for (int i = 0; i < NumSpectralSamples; ++i)
             values[i] *= r;
         return *this;
     }
 
-    CUDA_DEVICE_FUNCTION bool operator==(const SampledSpectrumTemplate &c) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool operator==(const SampledSpectrumTemplate &c) const {
         for (int i = 0; i < NumSpectralSamples; ++i)
             if (values[i] != c.values[i])
                 return false;
         return true;
     }
-    CUDA_DEVICE_FUNCTION bool operator!=(const SampledSpectrumTemplate &c) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool operator!=(const SampledSpectrumTemplate &c) const {
         for (int i = 0; i < NumSpectralSamples; ++i)
             if (values[i] != c.values[i])
                 return true;
         return false;
     }
 
-    CUDA_DEVICE_FUNCTION RealType &operator[](unsigned int index) {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE RealType &operator[](unsigned int index) {
         Assert(index < NumSpectralSamples, "\"index\" is out of range [0, %u].", NumSpectralSamples - 1);
         return values[index];
     }
-    CUDA_DEVICE_FUNCTION RealType operator[](unsigned int index) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE RealType operator[](unsigned int index) const {
         Assert(index < NumSpectralSamples, "\"index\" is out of range [0, %u].", NumSpectralSamples - 1);
         return values[index];
     }
 
-    CUDA_DEVICE_FUNCTION RealType avgValue() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE RealType avgValue() const {
         RealType sumVal = values[0];
         for (int i = 1; i < NumSpectralSamples; ++i)
             sumVal += values[i];
         return sumVal / NumSpectralSamples;
     }
-    CUDA_DEVICE_FUNCTION RealType maxValue() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE RealType maxValue() const {
         RealType maxVal = values[0];
         for (int i = 1; i < NumSpectralSamples; ++i)
             maxVal = std::fmax(values[i], maxVal);
         return maxVal;
     }
-    CUDA_DEVICE_FUNCTION RealType minValue() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE RealType minValue() const {
         RealType minVal = values[0];
         for (int i = 1; i < NumSpectralSamples; ++i)
             minVal = std::fmin(values[i], minVal);
         return minVal;
     }
-    CUDA_DEVICE_FUNCTION bool hasNonZero() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hasNonZero() const {
         for (int i = 0; i < NumSpectralSamples; ++i)
             if (values[i] != 0)
                 return true;
         return false;
     }
-    CUDA_DEVICE_FUNCTION bool hasNaN() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hasNaN() const {
         for (int i = 0; i < NumSpectralSamples; ++i)
             if (::rtc10::isnan(values[i]))
                 return true;
         return false;
     }
-    CUDA_DEVICE_FUNCTION bool hasInf() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hasInf() const {
         for (int i = 0; i < NumSpectralSamples; ++i)
             if (::rtc10::isinf(values[i]))
                 return true;
         return false;
     }
-    CUDA_DEVICE_FUNCTION bool allFinite() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool allFinite() const {
         return !hasNaN() && !hasInf();
     }
-    CUDA_DEVICE_FUNCTION bool hasNegative() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool hasNegative() const {
         for (int i = 0; i < NumSpectralSamples; ++i)
             if (values[i] < 0)
                 return true;
         return false;
     }
-    CUDA_DEVICE_FUNCTION bool allNonNegativeFinite() const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE bool allNonNegativeFinite() const {
         return allFinite() && !hasNegative();
     }
 
     // setting "primary" to 1.0 might introduce bias.
-    CUDA_DEVICE_FUNCTION RealType importance(uint32_t selectedLambda) const {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE RealType importance(uint32_t selectedLambda) const {
         // I hope a compiler to optimize away this if statement...
         // What I want to do is just only member function specialization of a template class while reusing other function definitions.
         if (NumSpectralSamples > 1) {

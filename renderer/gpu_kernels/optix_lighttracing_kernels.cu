@@ -73,7 +73,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void lightTrace_generic() {
     PCG32RNG rng = plp.s->ltRngBuffer[launchIndex];
 
     float wlPDensity;
-    const auto wls = WavelengthSamples::createWithEqualOffsets(
+    auto wls = WavelengthSamples::createWithEqualOffsets(
         rng.getFloat0cTo1o(), rng.getFloat0cTo1o(), &wlPDensity);
 
     Point3D rayOrigin;
@@ -184,6 +184,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void lightTrace_generic() {
         const SampledSpectrum fsValue = bsdf.sampleF(bsdfQuery, bsdfSample, &bsdfResult);
         if (bsdfResult.dirPDensity == 0.0f)
             break; // sampling failed.
+        if (bsdfResult.sampledType.isDispersive() && !wls.singleIsSelected()) {
+            bsdfResult.dirPDensity /= SampledSpectrum::NumComponents();
+            wls.setSingleIsSelected();
+        }
         rayDirection = interPt.fromLocal(bsdfResult.dirLocal);
         const float dotSGN = interPt.calcDot(rayDirection);
         const SampledSpectrum localThroughput = fsValue * (std::fabs(dotSGN) / bsdfResult.dirPDensity);
