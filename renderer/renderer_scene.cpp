@@ -130,6 +130,25 @@ void GPUEnvironment::initialize() {
         pipeline.sbt.initialize(cuContext, bufferType, sbtSize, 1);
         pipeline.sbt.setMappedMemoryPersistent(true);
         p.setShaderBindingTable(pipeline.sbt, pipeline.sbt.getMappedPointer());
+
+        uint32_t dcStackSizeFromState = 0;
+        for (int i = 0; i < NumCallablePrograms; ++i) {
+            dcStackSizeFromState = std::max(
+                dcStackSizeFromState, pipeline.callablePrograms[i].getDCStackSize());
+        }
+
+        const uint32_t dcStackSizeFromTrav = 0; // This sample doesn't call a direct callable during traversal.
+        // Possible Program Paths:
+        // RG - CH
+        // RG - AH
+        const uint32_t ccStackSize =
+            pipeline.entryPoints.at(PathTracingEntryPoint::pathTrace).getStackSize() +
+            std::max(
+                {
+                    chPathTrace.getCHStackSize(),
+                    ahVisibility.getAHStackSize(),
+                });
+        p.setStackSize(dcStackSizeFromTrav, dcStackSizeFromState, ccStackSize, 1);
     }
 
     {
@@ -196,6 +215,25 @@ void GPUEnvironment::initialize() {
         pipeline.sbt.initialize(cuContext, bufferType, sbtSize, 1);
         pipeline.sbt.setMappedMemoryPersistent(true);
         p.setShaderBindingTable(pipeline.sbt, pipeline.sbt.getMappedPointer());
+
+        uint32_t dcStackSizeFromState = 0;
+        for (int i = 0; i < NumCallablePrograms; ++i) {
+            dcStackSizeFromState = std::max(
+                dcStackSizeFromState, pipeline.callablePrograms[i].getDCStackSize());
+        }
+
+        const uint32_t dcStackSizeFromTrav = 0; // This sample doesn't call a direct callable during traversal.
+        // Possible Program Paths:
+        // RG - CH
+        // RG - AH
+        const uint32_t ccStackSize =
+            pipeline.entryPoints.at(LightTracingEntryPoint::lightTrace).getStackSize() +
+            std::max(
+                {
+                    chLightTrace.getCHStackSize(),
+                    ahVisibility.getAHStackSize(),
+                });
+        p.setStackSize(dcStackSizeFromTrav, dcStackSizeFromState, ccStackSize, 1);
     }
 
     {
@@ -264,6 +302,32 @@ void GPUEnvironment::initialize() {
         pipeline.sbt.initialize(cuContext, bufferType, sbtSize, 1);
         pipeline.sbt.setMappedMemoryPersistent(true);
         p.setShaderBindingTable(pipeline.sbt, pipeline.sbt.getMappedPointer());
+
+        uint32_t dcStackSizeFromState = 0;
+        for (int i = 0; i < NumCallablePrograms; ++i) {
+            dcStackSizeFromState = std::max(
+                dcStackSizeFromState, pipeline.callablePrograms[i].getDCStackSize());
+        }
+
+        const uint32_t dcStackSizeFromTrav = 0; // This sample doesn't call a direct callable during traversal.
+        // Light Pass: Possible Program Paths:
+        // RG - CH
+        const uint32_t lightPassCcStackSize =
+            pipeline.entryPoints.at(LvcBptEntryPoint::GenerateLightVertices).getStackSize() +
+            getHitInfo.getCHStackSize();
+        // Eye Pass: Possible Program Paths:
+        // RG - CH
+        // RG - AH
+        const uint32_t eyePassCcStackSize =
+            pipeline.entryPoints.at(LvcBptEntryPoint::EyePaths).getStackSize() +
+            std::max(
+                {
+                    getHitInfo.getCHStackSize(),
+                    visibility.getAHStackSize(),
+                });
+        p.setStackSize(
+            dcStackSizeFromTrav, dcStackSizeFromState,
+            std::max(lightPassCcStackSize, eyePassCcStackSize), 1);
     }
 }
 

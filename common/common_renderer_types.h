@@ -9,7 +9,7 @@
 //     無くした場合の性能を見たい場合にこのマクロを有効化する。
 // EN: Enable this switch when you want to see performance
 //     without dynamic function calls by callable programs or function pointers.
-static constexpr bool useGenericBSDF = false;
+static constexpr bool useGenericBSDF = true;
 //#define HARD_CODED_BSDF DichromaticBRDF
 //#define HARD_CODED_BSDF SimplePBR_BRDF
 #define HARD_CODED_BSDF LambertBRDF
@@ -979,14 +979,14 @@ enum class TransportMode {
 struct SurfaceMaterial;
 
 struct BSDFBuildFlags {
-    enum Value {
+    enum Value : uint32_t {
         None = 0,
         FromEDF = 1 << 0,
     } value;
 
-    CUDA_COMMON_FUNCTION constexpr BSDFBuildFlags(Value v = None) : value(v) {}
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr BSDFBuildFlags(Value v = None) : value(v) {}
 
-    CUDA_COMMON_FUNCTION operator uint32_t() const {
+    CUDA_COMMON_FUNCTION CUDA_INLINE operator uint32_t() const {
         return static_cast<uint32_t>(value);
     }
 };
@@ -1028,7 +1028,7 @@ struct BSDFQueryReverseResult {
 };
 
 using SetupBSDFBody = DynamicFunction<void(
-    const SurfaceMaterial &matData, TexCoord2D texCoord,
+    const SurfaceMaterial &matData, TexCoord2D texCoord, const WavelengthSamples &wls,
     uint32_t* bodyData, BSDFBuildFlags flags)>;
 
 using BSDFGetSurfaceParameters = DynamicFunction<void(
@@ -1784,11 +1784,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<LambertBRDF>(
     TexCoord2D texCoord, const WavelengthSamples &wls, uint32_t* bodyData, shared::BSDFBuildFlags /*flags*/)
 {
     const auto &mat = reinterpret_cast<const shared::LambertianSurfaceMaterial &>(matData.body);
-    const float4 reflectance = tex2DLod<float4>(mat.reflectance, texCoord.u, texCoord.v, 0.0f);
-    auto &bsdfBody = *reinterpret_cast<LambertBRDF*>(bodyData);
+    const float4 texValue = tex2DLod<float4>(mat.reflectance, texCoord.u, texCoord.v, 0.0f);
     const TripletSpectrum sp = createTripletSpectrum(
-        SpectrumType::Reflectance, ColorSpace::Rec709_D65, reflectance.x, reflectance.y, reflectance.z);
-    bsdfBody = LambertBRDF(sp.evaluate(wls));
+        SpectrumType::Reflectance, ColorSpace::Rec709_D65, texValue.x, texValue.y, texValue.z);
+    const SampledSpectrum reflectance = sp.evaluate(wls);
+    auto &bsdfBody = *reinterpret_cast<LambertBRDF*>(bodyData);
+    bsdfBody = LambertBRDF(reflectance);
 }
 
 
@@ -2484,11 +2485,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<DichromaticBRDF>(
     //const bool regularize = (flags & BSDFFlags::Regularize) != 0;
     //if (regularize)
     //    smoothness *= 0.5f;
-    auto &bsdfBody = *reinterpret_cast<DichromaticBRDF*>(bodyData);
     const auto spBaseColor = createTripletSpectrum(
         SpectrumType::Reflectance, ColorSpace::Rec709_D65, diffuseColor.x, diffuseColor.y, diffuseColor.z);
     const auto spF0Color = createTripletSpectrum(
         SpectrumType::Reflectance, ColorSpace::Rec709_D65, specularF0Color.x, specularF0Color.y, specularF0Color.z);
+    auto &bsdfBody = *reinterpret_cast<DichromaticBRDF*>(bodyData);
     bsdfBody = DichromaticBRDF(spBaseColor.evaluate(wls), spF0Color.evaluate(wls), min(smoothness, 0.999f));
 }
 
@@ -2507,10 +2508,10 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void setupBSDFBody<SimplePBR_BRDF>(
     //const bool regularize = (flags & BSDFFlags::Regularize) != 0;
     //if (regularize)
     //    smoothness *= 0.5f;
-    auto &bsdfBody = *reinterpret_cast<SimplePBR_BRDF*>(bodyData);
     const auto spBaseColor = createTripletSpectrum(
         SpectrumType::Reflectance, ColorSpace::Rec709_D65,
         baseColor_opacity.x, baseColor_opacity.y, baseColor_opacity.z);
+    auto &bsdfBody = *reinterpret_cast<SimplePBR_BRDF*>(bodyData);
     bsdfBody = SimplePBR_BRDF(spBaseColor.evaluate(wls), 0.5f, smoothness, metallic);
 }
 
@@ -2797,7 +2798,7 @@ public:
         shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
     {
         using namespace shared;
-        const bool isEdf = flags & BSDFBuildFlags::FromEDF;
+        const bool isEdf = (flags & BSDFBuildFlags::FromEDF);
         if (isEdf) {
             m_e.isDirectionalEdf = EmitterType(matData.emitterType) == EmitterType::Directional;
         }
@@ -2947,9 +2948,9 @@ public:
     {
         using namespace shared;
         Assert(
-            flags & BSDFBuildFlags::FromEDF == 0,
+            (flags & BSDFBuildFlags::FromEDF) == 0,
             "Unidirectional-grade BSDF does not support construction from EDF.");
-        matData.setupBSDFBody(matData, texCoord, m_s.data, flags);
+        matData.setupBSDFBody(matData, texCoord, wls, m_s.data, flags);
         const shared::BSDFProcedureSet &procSet = getBSDFProcedureSet(matData.bsdfProcSetSlot);
         m_s.getSurfaceParameters = procSet.getSurfaceParameters;
         m_s.evaluateDHReflectanceEstimate = procSet.evaluateDHReflectanceEstimate;
@@ -3067,12 +3068,12 @@ public:
         shared::BSDFBuildFlags flags = shared::BSDFBuildFlags::None)
     {
         using namespace shared;
-        const bool isEdf = flags & BSDFBuildFlags::FromEDF;
+        const bool isEdf = (flags & BSDFBuildFlags::FromEDF);
         if (isEdf) {
             m_e.isDirectionalEdf = EmitterType(matData.emitterType) == EmitterType::Directional;
         }
         else {
-            matData.setupBSDFBody(matData, texCoord, m_s.data, flags);
+            matData.setupBSDFBody(matData, texCoord, wls, m_s.data, flags);
             const shared::BSDFProcedureSet &procSet = getBSDFProcedureSet(matData.bsdfProcSetSlot);
             m_s.getSurfaceParameters = procSet.getSurfaceParameters;
             m_s.evaluateDHReflectanceEstimate = procSet.evaluateDHReflectanceEstimate;

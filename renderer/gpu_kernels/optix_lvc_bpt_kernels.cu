@@ -677,6 +677,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum connect(
 
     const Vector3D lConRayDirLocal = lInterPt.toLocal(-conRayDir);
     const Vector3D eConRayDirLocal = eInterPt.toLocal(conRayDir);
+    // これ自体は妥当だが、これを外したときになぜかLambertBRDFのevaluatePDFのrevValueがNaNになる？
+    if (lConRayDirLocal.z == 0 || eConRayDirLocal.z == 0)
+        return SampledSpectrum::Zero();
 
     const float lCosTerm = lInterPt.calcAbsDot(conRayDir);
     const float eCosTerm = eInterPt.calcAbsDot(conRayDir);
