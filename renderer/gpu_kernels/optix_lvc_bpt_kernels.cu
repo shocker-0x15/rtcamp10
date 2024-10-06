@@ -285,7 +285,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
         const float lastDist2 = squaredDistance(rayOrg, interPt.position);
         //if (rwPayload->originIsInfinity)
         //    lastDist2 = 1;
-        const float areaPDens = dirPDens * interPt.calcAbsDot(dirInLocal) / lastDist2;
+        const float areaPDens = dirPDens * interPt.calcAbsDot(dirIn) / lastDist2;
 
         storeLightVertex(
             surfPtId, interPt.position, throughput,
@@ -983,7 +983,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(eyePaths)() {
         const float lastDist2 = squaredDistance(rayOrg, eInterPt.position);
         //if (rwPayload->originIsInfinity)
         //    lastDist2 = 1;
-        const float areaPDens = dirPDens * eInterPt.calcAbsDot(dirOutLocal) / lastDist2;
+        const float areaPDens = dirPDens * eInterPt.calcAbsDot(dirOut) / lastDist2;
 
         const float lVtxProb = 1.0f / plp.s->lvcBptPassInfo->numLightVertices;
 
