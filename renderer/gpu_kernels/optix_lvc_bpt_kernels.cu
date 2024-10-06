@@ -613,16 +613,18 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
     const SampledSpectrum contribution = misWeight * unweightedContribution;
     const float2 pixel = make_float2(
         screenPos.x * plp.s->imageSize.x, screenPos.y * plp.s->imageSize.y);
-    if (contribution.allFinite() && onScreen) {
-        const uint2 pix(plp.s->imageSize.x * screenPos.x, plp.s->imageSize.y * screenPos.y);
-        plp.s->ltTargetBuffer[pix].atomicAdd(wls, contribution);
-    }
-    else {
-        printf(
-            "Pass %u, (%u, %u - %u, %u), k%u (s%ut1): Not a finite value.\n",
-            plp.f->numAccumFrames, optixGetLaunchIndex().x, optixGetLaunchIndex().y,
-            static_cast<int32_t>(pixel.x), static_cast<int32_t>(pixel.y),
-            lVtx.pathLength + 1, lVtx.pathLength + 1);
+    if (onScreen) {
+        if (contribution.allFinite()) {
+            const uint2 pix(plp.s->imageSize.x * screenPos.x, plp.s->imageSize.y * screenPos.y);
+            plp.s->ltTargetBuffer[pix].atomicAdd(wls, contribution);
+        }
+        else {
+            printf(
+                "Pass %u, (%u, %u - %u, %u), k%u (s%ut1): Not a finite value.\n",
+                plp.f->numAccumFrames, optixGetLaunchIndex().x, optixGetLaunchIndex().y,
+                static_cast<int32_t>(pixel.x), static_cast<int32_t>(pixel.y),
+                lVtx.pathLength + 1, lVtx.pathLength + 1);
+        }
     }
 }
 
