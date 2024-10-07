@@ -42,6 +42,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
         (cosX0 / (areaPDens * dirPDens * wlPDensity * imageSizeCorrFactor));
     float initImportance = throughput.importance(wls.selectedLambdaIndex());
     uint32_t pathLength = 0;
+    bool inObject = false;
     while (true) {
         ++pathLength;
 
@@ -58,7 +59,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
             instSlot, geomInstSlot, primIndex, b1, b2, hitDist);
 
         bool volEventHappens = false;
-        if (plp.f->enableVolume) {
+        if (plp.f->enableVolume && !inObject) {
             float fpDist = -std::log(1.0f - rng.getFloat0cTo1o()) / plp.f->volumeDensity;
             if (fpDist < hitDist) {
                 volEventHappens = true;
@@ -153,6 +154,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
             bsdfResult.dirPDensity /= SampledSpectrum::NumComponents();
             wls.setSingleIsSelected();
         }
+        if (bsdfResult.sampledType.isTransmission())
+            inObject = !inObject; // does not consider nested.
         rayDirection = interPt.fromLocal(bsdfResult.dirLocal);
         float dotSGN = interPt.calcDot(rayDirection);
         SampledSpectrum localThroughput = fsValue * (std::fabs(dotSGN) / bsdfResult.dirPDensity);

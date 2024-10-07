@@ -99,6 +99,7 @@ struct LightPathVertex {
     uint32_t prevDeltaSampled : 1;
     uint32_t pathLength : 16;
     uint32_t isInMedium : 1;
+    uint32_t isInObject : 1;
 
     CUDA_DEVICE_FUNCTION CUDA_INLINE LightPathVertex() {}
 };

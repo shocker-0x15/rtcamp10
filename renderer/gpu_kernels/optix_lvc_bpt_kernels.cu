@@ -22,7 +22,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void storeLightVertex(
     const Vector3D &dirInLocal, const Vector3D &dirInInMedium, float backwardConversionFactor,
     float probDensity, float prevProbDensity,
     float secondPrevPartialDenomMisWeight, float secondPrevProbRatioToFirst,
-    bool deltaSampled, bool prevDeltaSampled, bool wlSelected, bool isInMedium, uint32_t pathLength)
+    bool deltaSampled, bool prevDeltaSampled, bool wlSelected, bool isInMedium, bool isInObject,
+    uint32_t pathLength)
 {
     LightPathVertex lightVertex = {};
     if (isInMedium) {
@@ -48,6 +49,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void storeLightVertex(
     lightVertex.wlSelected = wlSelected;
     lightVertex.pathLength = pathLength;
     lightVertex.isInMedium = isInMedium;
+    lightVertex.isInObject = isInObject;
     const uint32_t cacheIdx = atomicAdd(&plp.s->lvcBptPassInfo->numLightVertices, 1u);
     plp.s->lightVertexCache[cacheIdx] = lightVertex;
 }
@@ -186,7 +188,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
             Vector3D(0, 0, 1), Vector3D(), 0,
             areaPDens, prevAreaPDens,
             secondPrevPartialDenomMisWeight, secondPrevProbRatioToFirst,
-            deltaSampled, prevDeltaSampled, false, false, 0);
+            deltaSampled, prevDeltaSampled, false, false, false, 0);
 
         secondPrevAreaPDens = prevAreaPDens;
         secondPrevDeltaSampled = prevDeltaSampled;
@@ -221,6 +223,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
 
     float secondPrevRevAreaPDens = 1.0f;
     uint32_t pathLength = 0;
+    bool inObject;
     while (true) {
         ++pathLength;
 
@@ -236,7 +239,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
             surfPtId.bcB, surfPtId.bcC, hitDist);
 
         bool volEventHappens = false;
-        if (plp.f->enableVolume) {
+        if (plp.f->enableVolume && !inObject) {
             const float uDist = rng.getFloat0cTo1o();
             const float fpDist = -std::log(1.0f - uDist) / plp.f->volumeDensity;
             if (fpDist < hitDist) {
@@ -294,7 +297,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
             areaPDens, prevAreaPDens,
             secondPrevPartialDenomMisWeight, secondPrevProbRatioToFirst,
             deltaSampled, prevDeltaSampled,
-            wls.singleIsSelected(), interPt.inMedium, pathLength);
+            wls.singleIsSelected(), interPt.inMedium, inObject, pathLength);
 
         secondPrevAreaPDens = prevAreaPDens;
         secondPrevDeltaSampled = prevDeltaSampled;
@@ -324,6 +327,8 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
             break; // sampling failed.
         if (bsdfResult.sampledType.isDispersive() && !wls.singleIsSelected())
             wls.setSingleIsSelected();
+        if (bsdfResult.sampledType.isTransmission())
+            inObject = !inObject; // does not consider nested.
         rayDir = interPt.fromLocal(bsdfResult.dirLocal);
         secondPrevRevAreaPDens = bsdfRevResult.dirPDensity * cosTerm / lastDist2;
 
@@ -491,7 +496,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
     const float lCosTerm = lInterPt.calcAbsDot(conRayDir);
     const float eCosTerm = eInterPt.calcAbsDot(conRayDir);
     float fracVis = 1.0f;
-    if (plp.f->enableVolume)
+    if (plp.f->enableVolume && !lVtx.isInObject)
         fracVis *= std::expf(-plp.f->volumeDensity * std::sqrt(conDist2));
     const float G = lCosTerm * eCosTerm * fracVis * recConDist2;
     float scalarConTerm = G / lVtxProb;
@@ -507,8 +512,9 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
     /*float forwardDirDensityL = */lBsdf.evaluatePDF(lBsdfQuery, lConRayDirLocal, &lBackwardDirPDens);
     //float forwardAreaDensityL = forwardDirDensityL * eCosTerm * recSquaredConDist;
     if constexpr (includeRrProbability) {
-        const SampledSpectrum localThroughput = lBackwardFs *
-            (std::fabs(dot(lBsdfQuery.dirLocal, lGeomNormalLocal)) / lBackwardDirPDens);
+        const float lBackCosTerm = lInterPt.inMedium ? 1.0f :
+            std::fabs(dot(lBsdfQuery.dirLocal, lGeomNormalLocal));
+        const SampledSpectrum localThroughput = lBackwardFs * (lBackCosTerm / lBackwardDirPDens);
         const float rrProb = std::fmin(localThroughput.importance(wls.selectedLambdaIndex()), 1.0f);
         lBackwardDirPDens *= rrProb;
     }
@@ -596,7 +602,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum connect(
     const float secondPrevPartialDenomMisWeight,
     const bool deltaSampled, const bool prevDeltaSampled,
     const WavelengthSamples &wls,
-    const float uLVtx, const float lVtxProb, uint32_t pathLength)
+    const float uLVtx, const float lVtxProb, bool inObject, uint32_t pathLength)
 {
     if (!eBsdf.hasNonDelta())
         return SampledSpectrum::Zero();
@@ -644,7 +650,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum connect(
     const float lCosTerm = lInterPt.calcAbsDot(conRayDir);
     const float eCosTerm = eInterPt.calcAbsDot(conRayDir);
     float fracVis = 1.0f;
-    if (plp.f->enableVolume)
+    if (plp.f->enableVolume && !inObject && !lVtx.isInObject)
         fracVis *= std::expf(-plp.f->volumeDensity * std::sqrt(conDist2));
     const float G = lCosTerm * eCosTerm * fracVis * recConDist2;
     float scalarConTerm = G / lVtxProb;
@@ -820,6 +826,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(eyePaths)() {
     auto contribution = SampledSpectrum::Zero();
     float secondPrevRevAreaPDens = 1.0f;
     uint32_t pathLength = 0;
+    bool inObject = false;
     while (true) {
         ++pathLength;
 
@@ -835,7 +842,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(eyePaths)() {
             surfPtId.bcB, surfPtId.bcC, hitDist);
 
         bool volEventHappens = false;
-        if (plp.f->enableVolume) {
+        if (plp.f->enableVolume && !inObject) {
             const float uDist = rng.getFloat0cTo1o();
             const float fpDist = -std::log(1.0f - uDist) / plp.f->volumeDensity;
             if (fpDist < hitDist) {
@@ -971,7 +978,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(eyePaths)() {
             areaPDens, prevAreaPDens,
             secondPrevPartialDenomMisWeight,
             deltaSampled, prevDeltaSampled,
-            wls, rng.getFloat0cTo1o(), lVtxProb, pathLength);
+            wls, rng.getFloat0cTo1o(), lVtxProb, inObject, pathLength);
 
         secondPrevAreaPDens = prevAreaPDens;
         secondPrevDeltaSampled = prevDeltaSampled;
@@ -986,6 +993,8 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(eyePaths)() {
             break; // sampling failed.
         if (bsdfResult.sampledType.isDispersive() && !wls.singleIsSelected())
             wls.setSingleIsSelected();
+        if (bsdfResult.sampledType.isTransmission())
+            inObject = !inObject; // does not consider nested.
         rayDir = eInterPt.fromLocal(bsdfResult.dirLocal);
         secondPrevRevAreaPDens = bsdfRevResult.dirPDensity * cosTerm / lastDist2;
 
