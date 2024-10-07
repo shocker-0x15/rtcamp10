@@ -223,7 +223,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
 
     float secondPrevRevAreaPDens = 1.0f;
     uint32_t pathLength = 0;
-    bool inObject;
+    bool inObject = false;
     while (true) {
         ++pathLength;
 

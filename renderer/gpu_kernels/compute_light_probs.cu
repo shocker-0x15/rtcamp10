@@ -199,7 +199,7 @@ CUDA_DEVICE_KERNEL void computeMipOfImportanceMap(
         return;
 
     uint2 srcDims = impMap->getDimensions() >> (dstMipLevel - 1);
-    uint2 dstDims = max(impMap->getDimensions() >> dstMipLevel, make_uint2(1, 1));
+    uint2 dstDims = ::max(impMap->getDimensions() >> dstMipLevel, make_uint2(1, 1));
     uint2 globalIndex = make_uint2(blockDim.x * blockIdx.x + threadIdx.x,
                                    blockDim.y * blockIdx.y + threadIdx.y);
     uint2 ul = 2 * globalIndex;

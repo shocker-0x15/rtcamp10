@@ -14,6 +14,100 @@
 #define v3print(v) (v).x, (v).y, (v).z
 #define v4print(v) (v).x, (v).y, (v).z, (v).w
 
+
+
+// std-complementary functions for CUDA
+namespace stc {
+    template <typename T>
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr void swap(T &a, T &b) {
+#if defined(__CUDA_ARCH__)
+        T temp = a;
+        a = b;
+        b = temp;
+#else
+        std::swap(a, b);
+#endif
+    }
+
+    template <typename T>
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr T min(const T &a, const T &b) {
+        return a < b ? a : b;
+    }
+
+    template <typename T>
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr T max(const T &a, const T &b) {
+        return a > b ? a : b;
+    }
+
+    template <typename T>
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr T clamp(const T &x, const T &_min, const T &_max) {
+        return min(max(x, _min), _max);
+    }
+
+    template <std::floating_point F>
+    CUDA_COMMON_FUNCTION CUDA_INLINE bool isinf(const F x) {
+#if defined(__CUDA_ARCH__)
+        return static_cast<bool>(::isinf(x));
+#else
+        return std::isinf(x);
+#endif
+    }
+
+    template <std::floating_point F>
+    CUDA_COMMON_FUNCTION CUDA_INLINE bool isnan(const F x) {
+#if defined(__CUDA_ARCH__)
+        return static_cast<bool>(::isnan(x));
+#else
+        return std::isnan(x);
+#endif
+    }
+
+    template <std::floating_point F>
+    CUDA_COMMON_FUNCTION CUDA_INLINE bool isfinite(const F x) {
+#if defined(__CUDA_ARCH__)
+        return static_cast<bool>(::isfinite(x));
+#else
+        return std::isfinite(x);
+#endif
+    }
+
+    template <std::floating_point F>
+    CUDA_COMMON_FUNCTION CUDA_INLINE void sincos(const F x, F* const s, F* const c) {
+#if defined(__CUDA_ARCH__)
+        ::sincosf(x, s, c);
+#else
+        *s = std::sin(x);
+        *c = std::cos(x);
+#endif
+    }
+
+    template <typename DstType, typename SrcType>
+    CUDA_COMMON_FUNCTION CUDA_INLINE DstType bit_cast(const SrcType &x) {
+#if defined(__CUDA_ARCH__)
+        if constexpr (std::is_same_v<SrcType, int32_t> && std::is_same_v<DstType, float>)
+            return __int_as_float(x);
+        else if constexpr (std::is_same_v<SrcType, uint32_t> && std::is_same_v<DstType, float>)
+            return __uint_as_float(x);
+        else if constexpr (std::is_same_v<SrcType, float> && std::is_same_v<DstType, int32_t>)
+            return __float_as_int(x);
+        else if constexpr (std::is_same_v<SrcType, float> && std::is_same_v<DstType, uint32_t>)
+            return __float_as_uint(x);
+        static_assert(sizeof(DstType) == sizeof(SrcType), "Sizes do not match.");
+        union {
+            SrcType s;
+            DstType d;
+        } alias;
+        alias.s = x;
+        return alias.d;
+#else
+        return std::bit_cast<DstType>(x);
+#endif
+    }
+}
+
+
+
+
 #if !defined(__CUDA_ARCH__) && !defined(__CUDACC__)
 // ----------------------------------------------------------------
 // JP: CUDAビルトインに対応する型・関数をホスト側で定義しておく。
@@ -248,6 +342,13 @@ CUDA_COMMON_FUNCTION CUDA_INLINE uint2 operator>>(const uint2 &v, uint32_t s) {
 CUDA_COMMON_FUNCTION CUDA_INLINE uint2 &operator>>=(uint2 &v, uint32_t s) {
     v = v >> s;
     return v;
+}
+
+CUDA_COMMON_FUNCTION CUDA_INLINE uint32_t getComp(const uint3 &v, uint32_t c) {
+    return
+        c == 0 ? v.x :
+        c == 1 ? v.y :
+        v.z;
 }
 
 CUDA_COMMON_FUNCTION CUDA_INLINE float2 make_float2(float v) {
@@ -545,21 +646,39 @@ CUDA_COMMON_FUNCTION CUDA_INLINE float dot(const float4 &v0, const float4 &v1) {
 
 
 
-CUDA_COMMON_FUNCTION CUDA_INLINE int32_t floatToOrderedInt(float fVal) {
+CUDA_COMMON_FUNCTION CUDA_INLINE int32_t floatToOrderedInt(const float fVal) {
 #if defined(__CUDA_ARCH__)
-    int32_t iVal = __float_as_int(fVal);
+    const int32_t iVal = __float_as_int(fVal);
 #else
-    int32_t iVal = *reinterpret_cast<int32_t*>(&fVal);
+    const int32_t iVal = std::bit_cast<int32_t>(fVal);
 #endif
-    return (iVal >= 0) ? iVal : iVal ^ 0x7FFFFFFF;
+    return (iVal >= 0) ? iVal : iVal ^ 0x7FFF'FFFF;
 }
 
-CUDA_COMMON_FUNCTION CUDA_INLINE float orderedIntToFloat(int32_t iVal) {
-    int32_t orgVal = (iVal >= 0) ? iVal : iVal ^ 0x7FFFFFFF;
+CUDA_COMMON_FUNCTION CUDA_INLINE float orderedIntToFloat(const int32_t iVal) {
+    const int32_t orgBits = (iVal >= 0) ? iVal : iVal ^ 0x7FFF'FFFF;
 #if defined(__CUDA_ARCH__)
-    return __int_as_float(orgVal);
+    return __int_as_float(orgBits);
 #else
-    return *reinterpret_cast<float*>(&orgVal);
+    return std::bit_cast<float>(orgBits);
+#endif
+}
+
+CUDA_COMMON_FUNCTION CUDA_INLINE uint32_t floatToOrderedUInt(const float fVal) {
+#if defined(__CUDA_ARCH__)
+    const uint32_t uiVal = __float_as_uint(fVal);
+#else
+    const uint32_t uiVal = std::bit_cast<uint32_t>(fVal);
+#endif
+    return uiVal ^ (uiVal < 0x8000'0000 ? 0x8000'0000 : 0xFFFF'FFFF);
+}
+
+CUDA_COMMON_FUNCTION CUDA_INLINE float orderedUIntToFloat(const uint32_t uiVal) {
+    const uint32_t orgBits = uiVal ^ (uiVal >= 0x8000'0000 ? 0x8000'0000 : 0xFFFF'FFFF);
+#if defined(__CUDA_ARCH__)
+    return __uint_as_float(orgBits);
+#else
+    return std::bit_cast<float>(orgBits);
 #endif
 }
 
@@ -1058,6 +1177,215 @@ struct TexCoord2DTemplate {
 
 
 
+template <std::floating_point F>
+struct AABBTemplate {
+    Point3DTemplate<F> minP;
+    Point3DTemplate<F> maxP;
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate() :
+        minP(Point3DTemplate<F>(INFINITY)), maxP(Point3DTemplate<F>(-INFINITY)) {}
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate(
+        const Point3DTemplate<F> &_minP, const Point3DTemplate<F> &_maxP) :
+        minP(_minP), maxP(_maxP) {}
+
+    template <bool isNormal>
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate &operator+=(const Vector3DTemplate<F, isNormal> &r) {
+        minP += r;
+        maxP += r;
+        return *this;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate &unify(const Point3DTemplate<F> &p) {
+        minP = min(minP, p);
+        maxP = max(maxP, p);
+        return *this;
+    }
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate &unify(const AABBTemplate &bb) {
+        minP = min(minP, bb.minP);
+        maxP = max(maxP, bb.maxP);
+        return *this;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate &intersect(const AABBTemplate &bb) {
+        minP = max(minP, bb.minP);
+        maxP = min(maxP, bb.maxP);
+        return *this;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate &dilate(const F scale) {
+        Vector3DTemplate<F, false> d = maxP - minP;
+        minP -= 0.5f * (scale - 1) * d;
+        maxP += 0.5f * (scale - 1) * d;
+        return *this;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr Point3DTemplate<F> getCenter() const {
+        return 0.5f * (minP + maxP);
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr F getMinDimSize() const {
+        Vector3DTemplate<F, false> d = maxP - minP;
+        return stc::min(stc::min(d.x, d.y), d.z);
+    }
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr F getMaxDimSize() const {
+        Vector3DTemplate<F, false> d = maxP - minP;
+        return stc::max(stc::max(d.x, d.y), d.z);
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr F calcHalfSurfaceArea() const {
+        const Vector3DTemplate<F, false> d = maxP - minP;
+        return d.x * d.y + d.y * d.z + d.z * d.x;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr Point3DTemplate<F> normalize(const Point3DTemplate<F> &p) const {
+        return static_cast<Point3DTemplate<F>>(safeDivide(p - minP, maxP - minP));
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr bool isValid() const {
+        Vector3DTemplate<F, false> d = maxP - minP;
+        return d.x >= 0.0f && d.y >= 0.0f && d.z >= 0.0f;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr bool intersect(
+        const Point3DTemplate<F> &org, const Vector3DTemplate<F, false> &dir, const F distMin, const F distMax) const {
+        if (!isValid())
+            return INFINITY;
+        const Vector3DTemplate<F, false> invRayDir = 1.0f / dir;
+        const Vector3DTemplate<F, false> tNear = (minP - org) * invRayDir;
+        const Vector3DTemplate<F, false> tFar = (maxP - org) * invRayDir;
+        const Vector3DTemplate<F, false> near = min(tNear, tFar);
+        const Vector3DTemplate<F, false> far = max(tNear, tFar);
+        F t0 = std::fmax(std::fmax(near.x, near.y), near.z);
+        F t1 = std::fmin(std::fmin(far.x, far.y), far.z);
+        t0 = std::fmax(t0, distMin);
+        t1 = std::fmin(t1, distMax);
+        return t0 <= t1 && t1 > 0.0f;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr bool intersect(
+        const Point3DTemplate<F> &org, const Vector3DTemplate<F, false> &dir, const F distMin, const F distMax,
+        float* const hitDistMin, float* const hitDistMax) const {
+        if (!isValid())
+            return false;
+        //const Vector3DTemplate<F, false> invRayDir = 1.0f / dir;
+        const Vector3DTemplate<F, false> invRayDir(
+            1.0f / dir.x, 1.0f / dir.y, 1.0f / dir.z);
+        const Vector3DTemplate<F, false> tNear = (minP - org) * invRayDir;
+        const Vector3DTemplate<F, false> tFar = (maxP - org) * invRayDir;
+        const Vector3DTemplate<F, false> near = min(tNear, tFar);
+        const Vector3DTemplate<F, false> far = max(tNear, tFar);
+        *hitDistMin = std::fmax(std::fmax(near.x, near.y), near.z);
+        *hitDistMax = std::fmin(std::fmin(far.x, far.y), far.z);
+        *hitDistMin = std::fmax(*hitDistMin, distMin);
+        *hitDistMax = std::fmin(*hitDistMax, distMax);
+        return *hitDistMin <= *hitDistMax && *hitDistMax > 0.0f;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr F intersect(
+        const Point3DTemplate<F> &org, const Vector3DTemplate<F, false> &dir,
+        const F distMin, const F distMax,
+        F* const u, F* const v, bool* const isFrontHit) const {
+        if (!isValid())
+            return INFINITY;
+        const Vector3DTemplate<F, false> invRayDir = 1.0f / dir;
+        const Vector3DTemplate<F, false> tNear = (minP - org) * invRayDir;
+        const Vector3DTemplate<F, false> tFar = (maxP - org) * invRayDir;
+        const Vector3DTemplate<F, false> near = min(tNear, tFar);
+        const Vector3DTemplate<F, false> far = max(tNear, tFar);
+        F t0 = std::fmax(std::fmax(near.x, near.y), near.z);
+        F t1 = std::fmin(std::fmin(far.x, far.y), far.z);
+        *isFrontHit = t0 >= 0.0f;
+        t0 = std::fmax(t0, distMin);
+        t1 = std::fmin(t1, distMax);
+        if (!(t0 <= t1 && t1 > 0.0f))
+            return INFINITY;
+
+        const F t = *isFrontHit ? t0 : t1;
+        Vector3DTemplate<F, false> n = -sign(dir) * step(near.yzx(), near) * step(near.zxy(), near);
+        if (!*isFrontHit)
+            n = -n;
+
+        int32_t faceID = static_cast<int32_t>(dot(abs(n), Vector3DTemplate<F, false>(2, 4, 8)));
+        faceID ^= static_cast<int32_t>(any(n > Vector3DTemplate<F, false>(0.0f)));
+
+        const int32_t faceDim = tzcnt(faceID & ~0b1) - 1;
+        const int32_t dim0 = (faceDim + 1) % 3;
+        const int32_t dim1 = (faceDim + 2) % 3;
+        const Point3DTemplate<F> p = org + t * dir;
+        const F min0 = minP[dim0];
+        const F max0 = maxP[dim0];
+        const F min1 = minP[dim1];
+        const F max1 = maxP[dim1];
+        *u = std::fmin(std::fmax((p[dim0] - min0) / (max0 - min0), 0.0f), 1.0f)
+            + static_cast<F>(faceID);
+        *v = std::fmin(std::fmax((p[dim1] - min1) / (max1 - min1), 0.0f), 1.0f);
+
+        return t;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr Point3DTemplate<F> restoreHitPoint(
+        F u, const F v, Vector3DTemplate<F, true>* const normal) const {
+        const auto faceID = static_cast<uint32_t>(u);
+        u = std::fmod(u, 1.0f);
+
+        const int32_t faceDim = tzcnt(faceID & ~0b1) - 1;
+        const bool isPosSide = faceID & 0b1;
+        *normal = Vector3DTemplate<F, true>(0.0f);
+        (*normal)[faceDim] = isPosSide ? 1 : -1;
+
+        const int32_t dim0 = (faceDim + 1) % 3;
+        const int32_t dim1 = (faceDim + 2) % 3;
+        Point3DTemplate<F> p;
+        p[faceDim] = isPosSide ? maxP[faceDim] : minP[faceDim];
+        p[dim0] = lerp(minP[dim0], maxP[dim0], u);
+        p[dim1] = lerp(minP[dim1], maxP[dim1], v);
+
+        return p;
+    }
+
+    CUDA_COMMON_FUNCTION CUDA_INLINE constexpr Vector3DTemplate<F, true> restoreNormal(const F u, const F v) const {
+        const auto faceID = static_cast<uint32_t>(u);
+        const int32_t faceDim = tzcnt(faceID & ~0b1) - 1;
+        const bool isPosSide = faceID & 0b1;
+        auto normal = Vector3DTemplate<F, true>(0.0f);
+        normal[faceDim] = isPosSide ? 1 : -1;
+        return normal;
+    }
+};
+
+template <std::floating_point F, bool isNormal>
+CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate<F> operator+(
+    const AABBTemplate<F> &a, const Vector3DTemplate<F, isNormal> &b) {
+    AABBTemplate<F> ret = a;
+    ret += b;
+    return ret;
+}
+
+template <std::floating_point F>
+CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate<F> unify(
+    const AABBTemplate<F> &bb, const Point3DTemplate<F> &p) {
+    AABBTemplate<F> ret = bb;
+    ret.unify(p);
+    return ret;
+}
+template <std::floating_point F>
+CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate<F> unify(
+    const AABBTemplate<F> &bbA, const AABBTemplate<F> &bbB) {
+    AABBTemplate<F> ret = bbA;
+    ret.unify(bbB);
+    return ret;
+}
+
+template <std::floating_point F>
+CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate<F> intersect(
+    const AABBTemplate<F> &bbA, const AABBTemplate<F> &bbB) {
+    AABBTemplate<F> ret = bbA;
+    ret.intersect(bbB);
+    return ret;
+}
+
+
+
 template <typename RealType>
 struct Matrix3x3Template {
     using Vector3D = Vector3DTemplate<RealType>;
@@ -1277,6 +1605,22 @@ struct Matrix3x3Template {
         return Matrix3x3Template(data);
     }
 };
+
+template <typename RealType>
+CUDA_COMMON_FUNCTION CUDA_INLINE constexpr AABBTemplate<RealType> operator*(
+    const Matrix3x3Template<RealType> &a, const AABBTemplate<RealType> &b) {
+    AABBTemplate<RealType> ret;
+    ret
+        .unify(a * Point3DTemplate<RealType>(b.minP.x, b.minP.y, b.minP.z))
+        .unify(a * Point3DTemplate<RealType>(b.maxP.x, b.minP.y, b.minP.z))
+        .unify(a * Point3DTemplate<RealType>(b.minP.x, b.maxP.y, b.minP.z))
+        .unify(a * Point3DTemplate<RealType>(b.maxP.x, b.maxP.y, b.minP.z))
+        .unify(a * Point3DTemplate<RealType>(b.minP.x, b.minP.y, b.maxP.z))
+        .unify(a * Point3DTemplate<RealType>(b.maxP.x, b.minP.y, b.maxP.z))
+        .unify(a * Point3DTemplate<RealType>(b.minP.x, b.maxP.y, b.maxP.z))
+        .unify(a * Point3DTemplate<RealType>(b.maxP.x, b.maxP.y, b.maxP.z));
+    return ret;
+}
 
 
 
@@ -2899,6 +3243,7 @@ using Vector3D = Vector3DTemplate<float>;
 using Normal3D = Normal3DTemplate<float>;
 using Vector4D = Vector4DTemplate<float>;
 using TexCoord2D = TexCoord2DTemplate<float>;
+using AABB = AABBTemplate<float>;
 using Matrix3x3 = Matrix3x3Template<float>;
 using Matrix4x4 = Matrix4x4Template<float>;
 using Quaternion = QuaternionTemplate<float>;

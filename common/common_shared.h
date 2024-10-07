@@ -41,12 +41,15 @@
 
 #   include <limits>
 #   include <algorithm>
+#   include <span>
+#   include <functional>
 
 #   include <immintrin.h>
 #endif
 
 #if __cplusplus >= 202002L
 #   include <numbers>
+#   include <bit>
 #endif
 
 #include "../common/utils/cuda_util.h"

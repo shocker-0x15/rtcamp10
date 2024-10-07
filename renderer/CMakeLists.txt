@@ -105,11 +105,6 @@ target_compile_options(
     "${TARGET_NAME}" PRIVATE
     "$<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>"
 )
-target_include_directories(
-    "${TARGET_NAME}" PRIVATE
-    "../ext/tiny-cuda-nn/dependencies"
-    "../ext/tiny-cuda-nn/include"
-)
 target_link_libraries(
     "${TARGET_NAME}"
     fakelib
