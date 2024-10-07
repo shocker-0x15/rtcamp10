@@ -53,7 +53,7 @@ struct WavelengthSamplesTemplate {
         return lambdas[_selectedLambdaIndex];
     }
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE CUDA_INLINE static WavelengthSamplesTemplate createWithEqualOffsets(
+    CUDA_DEVICE_FUNCTION CUDA_INLINE static WavelengthSamplesTemplate createWithEqualOffsets(
         RealType offset, RealType uLambda, RealType* PDF) {
         Assert(offset >= 0 && offset < 1, "\"offset\" must be in range [0, 1).");
         Assert(uLambda >= 0 && uLambda < 1, "\"uLambda\" must be in range [0, 1).");
@@ -66,7 +66,7 @@ struct WavelengthSamplesTemplate {
         return wls;
     }
 
-    CUDA_DEVICE_FUNCTION CUDA_INLINE CUDA_INLINE static constexpr uint32_t NumComponents() {
+    CUDA_DEVICE_FUNCTION CUDA_INLINE static constexpr uint32_t NumComponents() {
         return NumSpectralSamples;
     }
 };

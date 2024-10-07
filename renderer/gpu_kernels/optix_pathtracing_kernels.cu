@@ -62,7 +62,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
             float fpDist = -std::log(1.0f - rng.getFloat0cTo1o()) / plp.f->volumeDensity;
             if (fpDist < hitDist) {
                 volEventHappens = true;
-                hitDist = fpDist;
+                hitDist = std::fmax(fpDist, minimumFreePathLength);
             }
         }
 

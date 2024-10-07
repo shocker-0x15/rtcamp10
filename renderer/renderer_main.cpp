@@ -224,7 +224,7 @@ static void setUpPipelineLaunchParameters(uint32_t screenWidth, uint32_t screenH
             }
             ltRngBuffer.unmap();
         }
-        staticPlpOnHost.ltRngBuffer = ltRngBuffer.getROBuffer<shared::enableBufferOobCheck>();
+        staticPlpOnHost.ltRngBuffer = ltRngBuffer.getRWBuffer<shared::enableBufferOobCheck>();
 
         lightVertexCache.initialize(g_gpuEnv.cuContext, bufferType, 10 * numLightTracingPaths);
         staticPlpOnHost.lightVertexCache = lightVertexCache.getRWBuffer<shared::enableBufferOobCheck>();

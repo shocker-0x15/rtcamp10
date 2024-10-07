@@ -6,6 +6,8 @@ using namespace rtc10;
 using namespace rtc10::shared;
 using namespace rtc10::device;
 
+static constexpr float minimumFreePathLength = 1e-6f;
+
 
 
 struct HitGroupSBTRecordData {

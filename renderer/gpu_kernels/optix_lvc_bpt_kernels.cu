@@ -237,10 +237,11 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
 
         bool volEventHappens = false;
         if (plp.f->enableVolume) {
-            const float fpDist = -std::log(1.0f - rng.getFloat0cTo1o()) / plp.f->volumeDensity;
+            const float uDist = rng.getFloat0cTo1o();
+            const float fpDist = -std::log(1.0f - uDist) / plp.f->volumeDensity;
             if (fpDist < hitDist) {
                 volEventHappens = true;
-                hitDist = fpDist;
+                hitDist = std::fmax(fpDist, minimumFreePathLength);
             }
         }
 
@@ -650,43 +651,23 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum connect(
     if (wls.singleIsSelected() || lVtx.wlSelected)
         scalarConTerm *= SampledSpectrum::NumComponents();
 
-    //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-    //    printf(
-    //        "eP: (" V3FMT "), lp: (" V3FMT ")\n",
-    //        v3print(eInterPt.position), v3print(lInterPt.position));
-    //    printf(
-    //        "dirL, (" V3FMT "), smpL: (" V3FMT ")\n",
-    //        v3print(lBsdfQuery.dirLocal), v3print(lConRayDirLocal));
-    //    printf("lCos: %g, eCos: %g\n", lCosTerm, eCosTerm);
-    //    printf("recDist2: %g\n", recConDist2);
-    //}
-
     // on the light vertex
     SampledSpectrum lBackwardFs;
     const SampledSpectrum lForwardFs = lBsdf.evaluateF(lBsdfQuery, lConRayDirLocal, &lBackwardFs);
     float lBackwardDirPDens;
     float lForwardDirPDens = lBsdf.evaluatePDF(lBsdfQuery, lConRayDirLocal, &lBackwardDirPDens);
-    //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-    //    printf("lFwDirP: %g, lBkDirP: %g\n", lForwardDirPDens, lBackwardDirPDens);
-    //}
     if constexpr (includeRrProbability) {
         if (lVtx.pathLength > 0) {
-            const SampledSpectrum lLocalThroughput = lForwardFs *
-                (std::fabs(dot(lConRayDirLocal, lGeomNormalLocal)) / lForwardDirPDens);
+            const SampledSpectrum lLocalThroughput = lForwardFs * (lCosTerm / lForwardDirPDens);
             const float lRrProb = std::fmin(lLocalThroughput.importance(wls.selectedLambdaIndex()), 1.0f);
             lForwardDirPDens *= lRrProb;
-            //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-            //    printf("lRrProb: %g\n", lRrProb);
-            //}
         }
 
-        const SampledSpectrum eLocalThroughput = lBackwardFs *
-            (std::fabs(dot(lBsdfQuery.dirLocal, lGeomNormalLocal)) / lBackwardDirPDens);
+        const float lBackCosTerm = lInterPt.inMedium ? 1.0f :
+            std::fabs(dot(lBsdfQuery.dirLocal, lGeomNormalLocal));
+        const SampledSpectrum eLocalThroughput = lBackwardFs * (lBackCosTerm / lBackwardDirPDens);
         const float eRrProb = std::fmin(eLocalThroughput.importance(wls.selectedLambdaIndex()), 1.0f);
         lBackwardDirPDens *= eRrProb;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf("eRrProb: %g\n", eRrProb);
-        //}
     }
     const float lForwardAreaPDens = lForwardDirPDens * eCosTerm * recConDist2;
     float lBackwardAreaPDens = lBackwardDirPDens * lVtx.backwardConversionFactor;
@@ -698,25 +679,16 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum connect(
     const SampledSpectrum eForwardFs = eBsdf.evaluateF(eBsdfQuery, eConRayDirLocal, &eBackwardFs);
     float eBackwardDirPDens;
     float eForwardDirPDens = eBsdf.evaluatePDF(eBsdfQuery, eConRayDirLocal, &eBackwardDirPDens);
-    //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-    //    printf("eFwDirP: %g, eBkDirP: %g\n", eForwardDirPDens, eBackwardDirPDens);
-    //}
     if constexpr (includeRrProbability) {
-        const SampledSpectrum eLocalThroughput = eForwardFs *
-            (std::fabs(dot(eConRayDirLocal, eBsdfQuery.geometricNormalLocal)) / eForwardDirPDens);
+        const SampledSpectrum eLocalThroughput = eForwardFs * (eCosTerm / eForwardDirPDens);
         const float eRrProb = std::fmin(eLocalThroughput.importance(wls.selectedLambdaIndex()), 1.0f);
         eForwardDirPDens *= eRrProb;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf("eRrProb: %g\n", eRrProb);
-        //}
 
-        const SampledSpectrum lLocalThroughput = eBackwardFs *
-            (std::fabs(dot(eBsdfQuery.dirLocal, eBsdfQuery.geometricNormalLocal)) / eBackwardDirPDens);
+        const float eBackCosTerm = eInterPt.inMedium ? 1.0f :
+            std::fabs(dot(eBsdfQuery.dirLocal, eBsdfQuery.geometricNormalLocal));
+        const SampledSpectrum lLocalThroughput = eBackwardFs * (eBackCosTerm / eBackwardDirPDens);
         const float lRrProb = std::fmin(lLocalThroughput.importance(wls.selectedLambdaIndex()), 1.0f);
         eBackwardDirPDens *= lRrProb;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf("lRrProb: %g\n", lRrProb);
-        //}
     }
     const float eForwardAreaPDens = eForwardDirPDens * lCosTerm * recConDist2;
     //if (surfPtL.isPoint) // Delta function in the positional density (e.g. point light)
@@ -727,9 +699,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum connect(
     float lPartialDenomMisWeight;
     {
         float probRatioToFirst = lVtx.secondPrevProbRatioToFirst;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf("totalRatio: %g\n", probRatioToFirst);
-        //}
 
         const bool l2ndLastSegIsValidConnection =
             (!lVtx.deltaSampled && !lVtx.prevDeltaSampled) &&
@@ -740,14 +709,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum connect(
             (lVtx.secondPrevPartialDenomMisWeight + (l2ndLastSegIsValidConnection ? 1 : 0));
         if (lVtx.pathLength > 0)
             probRatioToFirst *= lastTo2ndLastProbRatio;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf(
-        //        "lBkAreaP: %g, lPrevP: %g\n",
-        //        lBackwardAreaPDens, lVtx.prevProbDensity);
-        //    printf("ratio: %g\n", lastTo2ndLastProbRatio);
-        //    printf("totalRatio: %g\n", probRatioToFirst);
-        //    printf("partDenomW: %g\n", lPartialDenomMisWeight);
-        //}
 
         const bool l1stLastSegIsValidConnection =
             (/*lBsdf.hasNonDelta() &&*/ !lVtx.deltaSampled) &&
@@ -757,22 +718,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum connect(
             pow2(curTo1stLastProbRatio) *
             (lPartialDenomMisWeight + (l1stLastSegIsValidConnection ? 1 : 0));
         probRatioToFirst *= curTo1stLastProbRatio;
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf(
-        //        "eFwAreaP: %g, lP: %g\n",
-        //        eForwardAreaPDens, lVtx.probDensity);
-        //    printf("ratio: %g\n", curTo1stLastProbRatio);
-        //    printf("totalRatio: %g\n", probRatioToFirst);
-        //    printf("partDenomW: %g\n", lPartialDenomMisWeight);
-        //}
 
         // JP: Implicit Light Sampling戦略にはLight Vertex Cacheからのランダムな選択確率は含まれない。
         // EN: Implicit light sampling strategy doesn't contain a probability to
         //     randomly select from the light vertex cache.
         lPartialDenomMisWeight += pow2(probRatioToFirst / lVtxProb);
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf("partDenomW: %g\n", lPartialDenomMisWeight);
-        //}
     }
 
     // extend light subpath, shorten eye subpath.
@@ -784,26 +734,12 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum connect(
         ePartialDenomMisWeight =
             pow2(lastTo2ndLastProbRatio) *
             (secondPrevPartialDenomMisWeight + (e2ndLastSegIsValidConnection ? 1 : 0));
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf(
-        //        "eBkAreaP: %g, ePrevP: %g\n",
-        //        eBackwardAreaPDens, prevAreaPDens);
-        //    printf("ratio: %g\n", lastTo2ndLastProbRatio);
-        //    printf("partDenomW: %g\n", ePartialDenomMisWeight);
-        //}
 
         const bool e1stLastSegIsValidConnection = /*eBsdf.hasNonDelta() &&*/ !deltaSampled;
         const float curTo1stLastProbRatio = lForwardAreaPDens / areaPDens;
         ePartialDenomMisWeight =
             pow2(curTo1stLastProbRatio) *
             (ePartialDenomMisWeight + (e1stLastSegIsValidConnection ? 1 : 0));
-        //if (isDebugPixel(uint2(optixGetLaunchIndex().x, optixGetLaunchIndex().y))) {
-        //    printf(
-        //        "lFwAreaP: %g, eP: %g\n",
-        //        lForwardAreaPDens, areaPDens);
-        //    printf("ratio: %g\n", curTo1stLastProbRatio);
-        //    printf("partDenomW: %g\n", ePartialDenomMisWeight);
-        //}
     }
 
     SampledSpectrum conTerm = lForwardFs * scalarConTerm * eForwardFs;
@@ -900,10 +836,11 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(eyePaths)() {
 
         bool volEventHappens = false;
         if (plp.f->enableVolume) {
-            const float fpDist = -std::log(1.0f - rng.getFloat0cTo1o()) / plp.f->volumeDensity;
+            const float uDist = rng.getFloat0cTo1o();
+            const float fpDist = -std::log(1.0f - uDist) / plp.f->volumeDensity;
             if (fpDist < hitDist) {
                 volEventHappens = true;
-                hitDist = fpDist;
+                hitDist = std::fmax(fpDist, minimumFreePathLength);
             }
         }
 
@@ -964,6 +901,7 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(eyePaths)() {
                     SpectrumType::LightSource, ColorSpace::Rec709_D65,
                     texValue.x, texValue.y, texValue.z).evaluate(wls);
 
+                // non-directional == diffuse here.
                 const SampledSpectrum Le = emittance / pi_v<float>;
                 SampledSpectrum unweightedContribution = throughput * Le;
                 if (wls.singleIsSelected())
