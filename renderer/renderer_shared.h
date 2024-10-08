@@ -485,7 +485,6 @@ struct PerFramePipelineLaunchParameters {
 
     WorldDimInfo worldDimInfo;
     LightDistribution lightInstDist;
-    LightDistribution dirLightInstDist;
 
     optixu::NativeBlockBuffer2D<RGBSpectrum> outputBuffer;
 

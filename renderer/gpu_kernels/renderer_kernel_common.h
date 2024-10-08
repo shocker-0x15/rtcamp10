@@ -310,7 +310,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void sampleLight(
     }
 }
 
-template <bool directional_only>
 CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleLight(
     const WavelengthSamples &wls,
     const float ul, const float up0, const float up1, const float ud0, const float ud1,
@@ -319,26 +318,13 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleLight(
 {
     float lightProb = 1.0f;
 
-    float uInst;
-    uint32_t emitterType;
-    if constexpr (directional_only) {
-        uInst = ul;
-        emitterType = 1;
-    }
-    else {
-        float emitterTypeProb;
-        emitterType = sampleDiscrete(
-            ul, &emitterTypeProb, &uInst, plp.f->lightInstDist.integral(), plp.f->dirLightInstDist.integral());
-        lightProb *= emitterTypeProb;
-    }
-    const LightDistribution lightInstDist = emitterType == 0 ?
-        plp.f->lightInstDist : plp.f->dirLightInstDist;
+    float uInst = ul;
 
     // JP: まずはインスタンスをサンプルする。
     // EN: First, sample an instance.
     float instProb;
     float uGeomInst;
-    const uint32_t instIdx = lightInstDist.sample(uInst, &instProb, &uGeomInst);
+    const uint32_t instIdx = plp.f->lightInstDist.sample(uInst, &instProb, &uGeomInst);
     const Instance &inst = plp.f->instances[instIdx];
     lightProb *= instProb;
     if (instProb == 0.0f) {
@@ -354,9 +340,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleLight(
     float geomInstProb;
     float uPrim;
     const GeometryGroup &geomGroup = plp.s->geometryGroups[inst.geomGroupSlot];
-    const LightDistribution lightGeomInstDist = emitterType == 0 ?
-        geomGroup.lightGeomInstDist : geomGroup.dirLightGeomInstDist;
-    const uint32_t geomInstIdxInGroup = lightGeomInstDist.sample(uGeomInst, &geomInstProb, &uPrim);
+    const uint32_t geomInstIdxInGroup = geomGroup.lightGeomInstDist.sample(uGeomInst, &geomInstProb, &uPrim);
     const uint32_t geomInstIdx = geomGroup.geomInstSlots[geomInstIdxInGroup];
     const GeometryInstance &geomInst = plp.s->geometryInstances[geomInstIdx];
     lightProb *= geomInstProb;
@@ -410,7 +394,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleLight(
     *position = t0 * p[0] + t1 * p[1] + t2 * p[2];
     *normal = t0 * v[0].normal + t1 * v[1].normal + t2 * v[2].normal;
     *normal = normalize(inst.transform * *normal);
-    if (emitterType == 0) {
+    if (EmitterType(mat.emitterType) == EmitterType::Diffuse) {
         const Vector3D dirLocal = cosineSampleHemisphere(ud0, ud1);
         const ReferenceFrame lightFrame(*normal);
         *direction = lightFrame.fromLocal(dirLocal);
@@ -429,7 +413,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum sampleLight(
             SpectrumType::LightSource, ColorSpace::Rec709_D65,
             texValue.x, texValue.y, texValue.z);
         Le = spEmittance.evaluate(wls);
-        if (emitterType == 0)
+        if (EmitterType(mat.emitterType) == EmitterType::Diffuse)
             Le /= pi_v<float>;
     }
 

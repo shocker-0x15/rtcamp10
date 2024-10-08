@@ -1349,7 +1349,6 @@ struct StaticTransform {
 struct GeometryGroup {
     ROBuffer<uint32_t> geomInstSlots;
     LightDistribution lightGeomInstDist;
-    LightDistribution dirLightGeomInstDist;
     BoundingBox3D aabb;
 };
 

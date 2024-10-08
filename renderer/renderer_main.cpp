@@ -1032,14 +1032,11 @@ static int32_t runGuiApp() {
             g_scene.setUpLightInstDistribution(
                 curCuStream,
                 perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, worldDimInfo),
-                perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, lightInstDist),
-                perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, dirLightInstDist));
+                perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, lightInstDist));
         }
         curGpuTimer.computeLightProbs.stop(curCuStream);
         //g_scene.checkLightInstDistribution(
         //    perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, lightInstDist));
-        //g_scene.checkLightInstDistribution(
-        //    perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, dirLightInstDist));
 
         //{
         //    CUDADRV_CHECK(cuStreamSynchronize(curCuStream));
@@ -1285,8 +1282,7 @@ static int32_t runApp() {
         g_scene.setUpLightInstDistribution(
             cuStream,
             perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, worldDimInfo),
-            perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, lightInstDist),
-            perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, dirLightInstDist));
+            perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, lightInstDist));
         //g_scene.checkLightInstDistribution(
         //    perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, lightInstDist));
 

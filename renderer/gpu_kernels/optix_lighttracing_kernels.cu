@@ -7,8 +7,6 @@ CUDA_DEVICE_KERNEL void RT_AH_NAME(visibility)() {
 
 
 
-#define USE_ONLY_DIRECTIONAL_LIGHT 1
-
 CUDA_DEVICE_FUNCTION CUDA_INLINE void performNextEventEstimation(
     const SampledSpectrum &throughput,
     const InteractionPoint &interPt,
@@ -64,11 +62,6 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void performNextEventEstimation(
 
 
 CUDA_DEVICE_FUNCTION CUDA_INLINE void lightTrace_generic() {
-    if constexpr (USE_ONLY_DIRECTIONAL_LIGHT) {
-        if (plp.f->dirLightInstDist.integral() == 0.0f)
-            return;
-    }
-
     const uint32_t launchIndex = optixGetLaunchIndex().x;
     PCG32RNG rng = plp.s->ltRngBuffer[launchIndex];
 
@@ -81,7 +74,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void lightTrace_generic() {
     Normal3D lpNormal;
     float lpAreaPDensity;
     float lDirPDensity;
-    const SampledSpectrum Le = sampleLight<USE_ONLY_DIRECTIONAL_LIGHT>(
+    const SampledSpectrum Le = sampleLight(
         wls,
         rng.getFloat0cTo1o(),
         rng.getFloat0cTo1o(), rng.getFloat0cTo1o(),

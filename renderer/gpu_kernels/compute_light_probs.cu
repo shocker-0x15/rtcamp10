@@ -70,7 +70,6 @@ CUDA_DEVICE_KERNEL void computeGeomInstProbBuffer(
     uint32_t linearIndex = blockDim.x * blockIdx.x + threadIdx.x;
     if (linearIndex == 0) {
         geomGroup->lightGeomInstDist.setNumValues(numGeomInsts);
-        geomGroup->dirLightGeomInstDist.setNumValues(numGeomInsts);
     }
     if (linearIndex < numGeomInsts) {
         uint32_t slot = geomGroup->geomInstSlots[linearIndex];
@@ -81,8 +80,6 @@ CUDA_DEVICE_KERNEL void computeGeomInstProbBuffer(
 
         geomGroup->lightGeomInstDist.setWeightAt(
             linearIndex, emitterType == EmitterType::Diffuse ? importance : 0.0f);
-        geomGroup->dirLightGeomInstDist.setWeightAt(
-            linearIndex, emitterType == EmitterType::Directional ? importance : 0.0f);
     }
 }
 
@@ -102,14 +99,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE float computeInstImportance(
 }
 
 CUDA_DEVICE_KERNEL void computeInstProbBuffer(
-    WorldDimInfo* worldDimInfo,
-    DiscreteDistribution1D* lightInstDist, DiscreteDistribution1D* dirLightInstDist,
-    uint32_t numInsts,
+    WorldDimInfo* worldDimInfo, DiscreteDistribution1D* lightInstDist, uint32_t numInsts,
     const GeometryGroup* geomGroupBuffer, const Instance* instanceBuffer) {
     uint32_t linearIndex = blockDim.x * blockIdx.x + threadIdx.x;
     if (linearIndex == 0) {
         lightInstDist->setNumValues(numInsts);
-        dirLightInstDist->setNumValues(numInsts);
     }
     if (linearIndex < numInsts) {
         const Instance &inst = instanceBuffer[linearIndex];
@@ -119,11 +113,9 @@ CUDA_DEVICE_KERNEL void computeInstProbBuffer(
         float uniformScale = scale.x;
         const GeometryGroup &geomGroup = geomGroupBuffer[inst.geomGroupSlot];
         float difImportance = pow2(uniformScale) * geomGroup.lightGeomInstDist.integral();
-        float dirImportance = pow2(uniformScale) * geomGroup.dirLightGeomInstDist.integral();
         BoundingBox3D instAabb = inst.transform * geomGroup.aabb;
 
         lightInstDist->setWeightAt(linearIndex, difImportance);
-        dirLightInstDist->setWeightAt(linearIndex, dirImportance);
 
         CUDA_SHARED_MEM uint32_t sm_aabbMem[sizeof(BoundingBox3DAsOrderedInt) / sizeof(uint32_t)];
         auto &sm_aabb = *reinterpret_cast<BoundingBox3DAsOrderedInt*>(sm_aabbMem);
@@ -151,12 +143,11 @@ CUDA_DEVICE_KERNEL void finalizeDiscreteDistribution1D(
 
 
 CUDA_DEVICE_KERNEL void finalizeWorldDimInfo(
-    WorldDimInfo* worldDimInfo, DiscreteDistribution1D* lightInstDist, DiscreteDistribution1D* dirLightInstDist) {
+    WorldDimInfo* worldDimInfo, DiscreteDistribution1D* lightInstDist) {
     if (threadIdx.x != 0)
         return;
 
     lightInstDist->finalize();
-    dirLightInstDist->finalize();
 
     auto aabbAsInt = *reinterpret_cast<BoundingBox3DAsOrderedInt*>(&worldDimInfo->aabb);
     BoundingBox3D aabb = static_cast<BoundingBox3D>(aabbAsInt);

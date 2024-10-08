@@ -565,7 +565,6 @@ void Scene::checkLightGeomDistributions() {
     for (const auto &it : m_geometryGroupSlotOwners) {
         const shared::GeometryGroup &geomGroup = geomGroups[it.first];
         shared::LightDistribution lightGeomInstDist = geomGroup.lightGeomInstDist;
-        shared::LightDistribution dirLightGeomInstDist = geomGroup.dirLightGeomInstDist;
         uint32_t numValues = lightGeomInstDist.numValues();
         if (numValues == 0)
             continue;
@@ -578,20 +577,13 @@ void Scene::checkLightGeomDistributions() {
             cdfs.data(), reinterpret_cast<CUdeviceptr>(lightGeomInstDist.cdfs()),
             numValues * sizeof(float)));
         printf("");
-        CUDADRV_CHECK(cuMemcpyDtoH(
-            weights.data(), reinterpret_cast<CUdeviceptr>(dirLightGeomInstDist.weights()),
-            numValues * sizeof(float)));
-        CUDADRV_CHECK(cuMemcpyDtoH(
-            cdfs.data(), reinterpret_cast<CUdeviceptr>(dirLightGeomInstDist.cdfs()),
-            numValues * sizeof(float)));
-        printf("");
     }
     m_geometryGroupBuffer.unmap();
 }
 
 void Scene::setUpLightInstDistribution(
     CUstream stream, CUdeviceptr worldDimInfoAddr,
-    CUdeviceptr lightInstDistAddr, CUdeviceptr dirLightInstDistAddr) {
+    CUdeviceptr lightInstDistAddr) {
     g_gpuEnv.computeLightProbs.initializeWorldDimInfo.launchWithThreadDim(
         stream, cudau::dim3(1),
         worldDimInfoAddr);
@@ -600,18 +592,12 @@ void Scene::setUpLightInstDistribution(
     lightInstDist.getDeviceType(&dLightInstDist);
     CUDADRV_CHECK(cuMemcpyHtoDAsync(
         lightInstDistAddr, &dLightInstDist, sizeof(dLightInstDist), stream));
-    shared::LightDistribution dDirLightInstDist;
-    dirLightInstDist.getDeviceType(&dDirLightInstDist);
-    CUDADRV_CHECK(cuMemcpyHtoDAsync(
-        dirLightInstDistAddr, &dDirLightInstDist, sizeof(dDirLightInstDist), stream));
 
     uint32_t numInsts = m_instanceSlotOwners.size();
     if (numInsts > 0) {
         g_gpuEnv.computeLightProbs.computeInstProbBuffer.launchWithThreadDim(
             stream, cudau::dim3(numInsts),
-            worldDimInfoAddr,
-            lightInstDistAddr, dirLightInstDistAddr,
-            numInsts,
+            worldDimInfoAddr, lightInstDistAddr, numInsts,
             m_geometryGroupBuffer.getDevicePointer(), m_instanceBuffer.getDevicePointer());
 
         size_t scratchMemSize = m_scanScratchMem.sizeInBytes();
@@ -620,16 +606,11 @@ void Scene::setUpLightInstDistribution(
             lightInstDist.weightsOnDevice(),
             lightInstDist.cdfOnDevice(),
             numInsts, stream));
-        CUDADRV_CHECK(cubd::DeviceScan::ExclusiveSum(
-            m_scanScratchMem.getDevicePointer(), scratchMemSize,
-            dirLightInstDist.weightsOnDevice(),
-            dirLightInstDist.cdfOnDevice(),
-            numInsts, stream));
     }
 
     g_gpuEnv.computeLightProbs.finalizeWorldDimInfo.launchWithThreadDim(
         stream, cudau::dim3(1),
-        worldDimInfoAddr, lightInstDistAddr, dirLightInstDistAddr);
+        worldDimInfoAddr, lightInstDistAddr);
 }
 
 void Scene::checkLightInstDistribution(CUdeviceptr lightInstDistAddr) {

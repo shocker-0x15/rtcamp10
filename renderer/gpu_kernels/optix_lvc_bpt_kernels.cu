@@ -61,18 +61,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SurfacePointIdentifier sampleLight(
     SurfacePointIdentifier surfPtId = {};
     float lightProb = 1.0f;
 
-    float emitterTypeProb;
-    float uInst;
-    const uint32_t emitterType = sampleDiscrete(
-        ul, &emitterTypeProb, &uInst,
-        plp.f->lightInstDist.integral(), plp.f->dirLightInstDist.integral());
-    lightProb *= emitterTypeProb;
-    const LightDistribution &lightInstDist = emitterType == 0 ?
-        plp.f->lightInstDist : plp.f->dirLightInstDist;
+    float uInst = ul;
 
     float instProb;
     float uGeomInst;
-    surfPtId.instSlot = lightInstDist.sample(uInst, &instProb, &uGeomInst);
+    surfPtId.instSlot = plp.f->lightInstDist.sample(uInst, &instProb, &uGeomInst);
     const Instance &inst = plp.f->instances[surfPtId.instSlot];
     lightProb *= instProb;
     if (instProb == 0.0f) {
@@ -83,9 +76,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SurfacePointIdentifier sampleLight(
     float geomInstProb;
     float uPrim;
     const GeometryGroup &geomGroup = plp.s->geometryGroups[inst.geomGroupSlot];
-    const LightDistribution &lightGeomInstDist = emitterType == 0 ?
-        geomGroup.lightGeomInstDist : geomGroup.dirLightGeomInstDist;
-    const uint32_t geomInstIdxInGroup = lightGeomInstDist.sample(uGeomInst, &geomInstProb, &uPrim);
+    const uint32_t geomInstIdxInGroup = geomGroup.lightGeomInstDist.sample(uGeomInst, &geomInstProb, &uPrim);
     surfPtId.geomInstSlot = geomGroup.geomInstSlots[geomInstIdxInGroup];
     const GeometryInstance &geomInst = plp.s->geometryInstances[surfPtId.geomInstSlot];
     lightProb *= geomInstProb;

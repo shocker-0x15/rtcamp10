@@ -137,7 +137,6 @@ class Scene {
     float m_majorant;
 
     LightDistribution lightInstDist;
-    LightDistribution dirLightInstDist;
     cudau::Buffer m_scanScratchMem;
 
 public:
@@ -161,7 +160,6 @@ public:
             optixu::AllowRandomInstanceAccess::No);
 
         lightInstDist.initialize(g_gpuEnv.cuContext, bufferType, nullptr, maxNumInstances);
-        dirLightInstDist.initialize(g_gpuEnv.cuContext, bufferType, nullptr, maxNumInstances);
 
         size_t scanScratchSize;
         constexpr int32_t maxScanSize = std::max<int32_t>({
@@ -224,7 +222,7 @@ public:
     void checkLightGeomDistributions();
     void setUpLightInstDistribution(
         CUstream stream, CUdeviceptr worldDimInfoAddr,
-        CUdeviceptr lightInstDistAddr, CUdeviceptr dirLightInstDistAddr);
+        CUdeviceptr lightInstDistAddr);
     void checkLightInstDistribution(CUdeviceptr lightInstDistAddr);
 };
 
@@ -696,7 +694,6 @@ class GeometryGroup {
     cudau::Buffer m_optixAsMem;
     cudau::TypedBuffer<uint32_t> m_geomInstSlotBuffer;
     LightDistribution m_lightGeomInstDist;
-    LightDistribution m_dirLightGeomInstDist;
     uint32_t m_dirty : 1;
     uint32_t m_gasIsDirty : 1;
 
@@ -724,7 +721,6 @@ public:
         }
         m_geomInstSlotBuffer.initialize(g_gpuEnv.cuContext, bufferType, geomInstSlots);
         m_lightGeomInstDist.initialize(g_gpuEnv.cuContext, bufferType, nullptr, geomInstSlots.size());
-        m_dirLightGeomInstDist.initialize(g_gpuEnv.cuContext, bufferType, nullptr, geomInstSlots.size());
         m_dirty = true;
         m_gasIsDirty = true;
     }
@@ -770,7 +766,6 @@ public:
         *deviceData = {};
         deviceData->geomInstSlots = m_geomInstSlotBuffer.getROBuffer<shared::enableBufferOobCheck>();
         m_lightGeomInstDist.getDeviceType(&deviceData->lightGeomInstDist);
-        m_dirLightGeomInstDist.getDeviceType(&deviceData->dirLightGeomInstDist);
         deviceData->aabb = m_aabb;
 
         m_dirty = false;
@@ -781,7 +776,7 @@ public:
         CUstream stream,
         const shared::GeometryGroup* deviceData,
         const shared::SurfaceMaterial* surfMatBuffer, const shared::GeometryInstance* geomInstBuffer) const {
-        if (!m_lightGeomInstDist.isInitialized() && !m_dirLightGeomInstDist.isInitialized())
+        if (!m_lightGeomInstDist.isInitialized())
             return;
         uint32_t numGeomInsts = m_geomInstSlotBuffer.numElements();
         g_gpuEnv.computeLightProbs.computeGeomInstProbBuffer.launchWithThreadDim(
@@ -793,7 +788,7 @@ public:
     void scanLightDistribution(
         CUstream stream,
         const shared::GeometryGroup* deviceData) const {
-        if (!m_lightGeomInstDist.isInitialized() && !m_dirLightGeomInstDist.isInitialized())
+        if (!m_lightGeomInstDist.isInitialized())
             return;
         uint32_t numGeomInsts = m_geomInstSlotBuffer.numElements();
         const cudau::Buffer &scanScratchMem = g_scene.getScanScratchMemory();
@@ -803,23 +798,15 @@ public:
             m_lightGeomInstDist.weightsOnDevice(),
             m_lightGeomInstDist.cdfOnDevice(),
             numGeomInsts, stream));
-        CUDADRV_CHECK(cubd::DeviceScan::ExclusiveSum(
-            scanScratchMem.getDevicePointer(), scratchMemSize,
-            m_dirLightGeomInstDist.weightsOnDevice(),
-            m_dirLightGeomInstDist.cdfOnDevice(),
-            numGeomInsts, stream));
     }
     void finalizeLightDistribution(
         CUstream stream,
         const shared::GeometryGroup* deviceData) const {
-        if (!m_lightGeomInstDist.isInitialized() && !m_dirLightGeomInstDist.isInitialized())
+        if (!m_lightGeomInstDist.isInitialized())
             return;
         g_gpuEnv.computeLightProbs.finalizeDiscreteDistribution1D.launchWithThreadDim(
             stream, cudau::dim3(1),
             &deviceData->lightGeomInstDist);
-        g_gpuEnv.computeLightProbs.finalizeDiscreteDistribution1D.launchWithThreadDim(
-            stream, cudau::dim3(1),
-            &deviceData->dirLightGeomInstDist);
     }
 };
 
