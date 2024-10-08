@@ -75,11 +75,9 @@ CUDA_DEVICE_KERNEL void computeGeomInstProbBuffer(
         uint32_t slot = geomGroup->geomInstSlots[linearIndex];
         const GeometryInstance &geomInst = geometryInstanceBuffer[slot];
         const SurfaceMaterial &surfMat = surfMatBuffer[geomInst.surfMatSlot];
-        const auto emitterType = static_cast<EmitterType>(surfMat.emitterType);
         float importance = geomInst.emitterPrimDist.integral();
 
-        geomGroup->lightGeomInstDist.setWeightAt(
-            linearIndex, emitterType == EmitterType::Diffuse ? importance : 0.0f);
+        geomGroup->lightGeomInstDist.setWeightAt(linearIndex, importance);
     }
 }
 
