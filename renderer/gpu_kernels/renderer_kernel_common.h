@@ -498,7 +498,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE SampledSpectrum performNextEventEstimation(
     float visibility = 1.0f;
     VisibilityRaySignature::trace(
         plp.f->travHandle,
-        lightPoint.toNativeType(), shadowRayDir.toNativeType(), 0.0f, traceLength * 0.9999f, 0.0f,
+        lightPoint, shadowRayDir, 0.0f, traceLength * 0.9999f, 0.0f,
         0xFF, OPTIX_RAY_FLAG_NONE,
         PathTracingRayType::Visibility, shared::maxNumRayTypes, PathTracingRayType::Visibility,
         visibility);

@@ -53,7 +53,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
         float hitDist = 1e+10f;
         ClosestRaySignature::trace(
             plp.f->travHandle,
-            rayOrigin.toNativeType(), rayDirection.toNativeType(), 0.0f, 1e+10f, 0.0f,
+            rayOrigin, rayDirection, 0.0f, 1e+10f, 0.0f,
             0xFF, OPTIX_RAY_FLAG_NONE,
             PathTracingRayType::Closest, maxNumRayTypes, PathTracingRayType::Closest,
             instSlot, geomInstSlot, primIndex, b1, b2, hitDist);

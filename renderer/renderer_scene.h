@@ -943,7 +943,7 @@ public:
         float scale;
         interpolateStates(timePoint, &position, &orientation, &scale);
         Matrix4x4 transform =
-            translate4x4(position) * orientation.toMatrix4x4() * scale4x4(scale) *
+            translate3D_4x4(position) * orientation.toMatrix4x4() * scale3D_4x4(scale) *
             m_staticTransform;
         BoundingBox3D geomGroupAABB = m_geomGroup->getAABB();
         BoundingBox3D ret = transform * geomGroupAABB;
@@ -957,7 +957,7 @@ public:
         float scale;
         interpolateStates(timePoint, &position, &orientation, &scale);
         Matrix4x4 transform =
-            translate4x4(position) * orientation.toMatrix4x4() * scale4x4(scale) *
+            translate3D_4x4(position) * orientation.toMatrix4x4() * scale3D_4x4(scale) *
             m_staticTransform;
 
         deviceData->geomGroupSlot = m_geomGroup->getSlot();
@@ -1333,7 +1333,7 @@ class AnalyticSkyEnvironment : public Environment {
             states[0]->solarDirection.makeCoordinateSystem(&axis, &b);
         }
 
-        *solarDirection = rotate3x3(angle * t, axis) * states[0]->solarDirection;
+        *solarDirection = rotate3D_3x3(angle * t, axis) * states[0]->solarDirection;
         *turbidity = lerp(states[0]->turbidity, states[1]->turbidity, t);
         //*groundAlbedo = lerp(states[0]->groundAlbedo, states[1]->groundAlbedo, t);
     }

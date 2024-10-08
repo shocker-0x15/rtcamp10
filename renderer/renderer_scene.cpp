@@ -2411,7 +2411,7 @@ void loadScene(const std::filesystem::path &sceneFilePath, RenderConfigs* render
                 overrideSurfMat = matNameToSurfMats.at(fileInfo.overrideMat);
             }
             loadTriangleMesh(
-                fileInfo.path, scale4x4<float>(fileInfo.scale), overrideSurfMat,
+                fileInfo.path, scale3D_4x4<float>(fileInfo.scale), overrideSurfMat,
                 &geomGroupInsts);
         }
         else if (std::holds_alternative<MeshInfo::Rectangle>(meshInfo.body)) {
