@@ -3,7 +3,7 @@
 #include "renderer_shared.h"
 #include "../common/common_host.h"
 
-namespace rtc10 {
+namespace rtc10::bvh {
 
 template <uint32_t arity>
 struct GeometryBVH {

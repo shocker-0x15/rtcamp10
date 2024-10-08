@@ -1,6 +1,6 @@
 #include "bvh_builder.h"
 
-namespace rtc10 {
+namespace rtc10::bvh {
 
 enum class PrimitiveType {
     Geometric = 0,

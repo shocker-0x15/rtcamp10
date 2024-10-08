@@ -200,6 +200,11 @@ void saveImage(
     uint32_t width, uint32_t height, uint32_t numChs, const float* data,
     const SDRImageSaverConfig &config);
 
+void saveImage(
+    const std::filesystem::path &filepath,
+    uint32_t width, uint32_t height, const float4* data,
+    const SDRImageSaverConfig &config);
+
 
 
 void initImageSaverThread();

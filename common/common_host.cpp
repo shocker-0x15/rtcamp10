@@ -573,6 +573,12 @@ void saveImage(
     delete[] image;
 }
 
+void saveImage(
+    const std::filesystem::path &filepath, uint32_t width, uint32_t height, const float4* data,
+    const SDRImageSaverConfig &config) {
+    saveImage(filepath, width, height, 4, reinterpret_cast<const float*>(data), config);
+}
+
 
 
 struct ImageSaverItem {
