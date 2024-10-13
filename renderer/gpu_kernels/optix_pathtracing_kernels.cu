@@ -164,6 +164,8 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
             localThroughput.allNonNegativeFinite(),
             "tp: (" SPDFMT "), dotSGN: %g, dirP: %g",
             spdprint(localThroughput), dotSGN, bsdfResult.dirPDensity);
+        //if (pathLength > 20)
+        //    printf("%u: dotSGN: %g\n", pathLength, dotSGN);
 
         rayOrigin = interPt.calcOffsetRayOrigin(dotSGN > 0.0f);
         dirPDens = bsdfResult.dirPDensity;
@@ -181,7 +183,7 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void pathTrace_generic() {
     if (plp.f->numAccumFrames == 0)
         plp.s->accumBuffer[launchIndex].reset();
     plp.s->accumBuffer[launchIndex].add(wls, contribution);
-    plp.s->ltTargetBuffer[launchIndex] = DiscretizedSpectrum::Zero();
+    //plp.s->ltTargetBuffer[launchIndex] = DiscretizedSpectrum::Zero();
 }
 
 

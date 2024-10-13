@@ -1210,7 +1210,7 @@ static int32_t runApp() {
         static_cast<float>(renderConfigs.imageWidth) / renderConfigs.imageHeight;
     perFramePlpOnHost.outputBuffer = cudaOutputBuffer.getSurfaceObject(0);
     perFramePlpOnHost.mousePosition = int2(0, 0);
-    perFramePlpOnHost.volumeDensity = 0.01f;
+    perFramePlpOnHost.volumeDensity = 1e-1f;
     perFramePlpOnHost.scatteringAlbedo = 0.1f;
     perFramePlpOnHost.enableVolume = true;
     perFramePlpOnHost.enableDebugPrint = false;
@@ -1286,16 +1286,39 @@ static int32_t runApp() {
         //g_scene.checkLightInstDistribution(
         //    perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, lightInstDist));
 
+        g_gpuEnv.clearLtTargetBuffer.launchWithThreadDim(
+            cuStream, cudau::dim3(renderConfigs.imageWidth, renderConfigs.imageHeight));
+
         for (int i = 0; i < numSamplesPerFrame; ++i) {
             CUDADRV_CHECK(cuMemcpyHtoDAsync(
                 perFramePlpOnDevice + offsetof(shared::PerFramePipelineLaunchParameters, numAccumFrames),
                 &i, sizeof(i), cuStream));
+#if 0
             g_gpuEnv.pathTracing.setEntryPoint(PathTracingEntryPoint::pathTrace);
             g_gpuEnv.pathTracing.optixPipeline.launch(
                 cuStream, plpOnDevice, renderConfigs.imageWidth, renderConfigs.imageHeight, 1);
             //g_gpuEnv.lightTracing.setEntryPoint(LightTracingEntryPoint::lightTrace);
             //g_gpuEnv.lightTracing.optixPipeline.launch(
             //    cuStream, plpOnDevice, numLightTracingPaths, 1, 1);
+#else
+            shared::LvcBptPassInfo lvcBptPassInfoOnHost = {};
+            lvcBptPassInfoOnHost.wls = WavelengthSamples::createWithEqualOffsets(
+                wavelengthRandoms[i % lengthof(wavelengthRandoms)],
+                singleWavelengthRandoms[i % lengthof(wavelengthRandoms)],
+                &lvcBptPassInfoOnHost.wlPDens);
+            lvcBptPassInfoOnHost.numLightVertices = 0;
+            CUDADRV_CHECK(cuMemcpyHtoDAsync(
+                lvcBptPassInfo.getCUdeviceptr(), &lvcBptPassInfoOnHost,
+                sizeof(lvcBptPassInfoOnHost), cuStream));
+
+            g_gpuEnv.lvcBpt.setEntryPoint(LvcBptEntryPoint::GenerateLightVertices);
+            g_gpuEnv.lvcBpt.optixPipeline.launch(
+                cuStream, plpOnDevice, numLightTracingPaths, 1, 1);
+
+            g_gpuEnv.lvcBpt.setEntryPoint(LvcBptEntryPoint::EyePaths);
+            g_gpuEnv.lvcBpt.optixPipeline.launch(
+                cuStream, plpOnDevice, renderConfigs.imageWidth, renderConfigs.imageHeight, 1);
+#endif
         }
 
         g_gpuEnv.applyToneMap.launchWithThreadDim(

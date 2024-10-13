@@ -174,12 +174,14 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
         const float areaPDens = plp.s->numLightPaths * lightPt.asSurf.hypAreaPDensity;
         throughput = Le0 / areaPDens;
 
-        storeLightVertex(
-            lightPtId, Point3D(), throughput,
-            Vector3D(0, 0, 1), Vector3D(), 0,
-            areaPDens, prevAreaPDens,
-            secondPrevPartialDenomMisWeight, secondPrevProbRatioToFirst,
-            deltaSampled, prevDeltaSampled, false, false, false, 0);
+        if (mat.emitterType == uint32_t(EmitterType::Diffuse)) {
+            storeLightVertex(
+                lightPtId, Point3D(), throughput,
+                Vector3D(0, 0, 1), Vector3D(), 0,
+                areaPDens, prevAreaPDens,
+                secondPrevPartialDenomMisWeight, secondPrevProbRatioToFirst,
+                deltaSampled, prevDeltaSampled, false, false, false, 0);
+        }
 
         secondPrevAreaPDens = prevAreaPDens;
         secondPrevDeltaSampled = prevDeltaSampled;
@@ -281,6 +283,13 @@ CUDA_DEVICE_KERNEL void RT_RG_NAME(generateLightVertices)() {
         //if (rwPayload->originIsInfinity)
         //    lastDist2 = 1;
         const float areaPDens = dirPDens * interPt.calcAbsDot(dirIn) / lastDist2;
+        //if (!isfinite(cosTerm / lastDist2)) {
+        //    printf(
+        //        "%u-%u: %g, %g, %u, pA: (" V3FMT "), pB: (" V3FMT "), %g\n",
+        //        plp.f->numAccumFrames, optixGetLaunchIndex().x,
+        //        cosTerm, lastDist2, volEventHappens, v3print(rayOrg), v3print(interPt.position),
+        //        hitDist);
+        //}
 
         storeLightVertex(
             surfPtId, interPt.position, throughput,
@@ -512,6 +521,11 @@ CUDA_DEVICE_FUNCTION CUDA_INLINE void connectFromLens(
     float lBackwardAreaPDens = lBackwardDirPDens * lVtx.backwardConversionFactor;
     if (lVtx.prevDeltaSampled)
         lBackwardAreaPDens = 0;
+    //if (!isfinite(lBackwardAreaPDens)) {
+    //    printf(
+    //        "%g, %u, %g, %g\n",
+    //        lBackwardAreaPDens, lVtx.pathLength, lBackwardDirPDens, lVtx.backwardConversionFactor);
+    //}
 
     // on the eye vertex
     //SampledSpectrum eBackwardFs;

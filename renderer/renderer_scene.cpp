@@ -1449,7 +1449,7 @@ static void loadTriangleMesh(
                     color[1] = 0.0f;
                     color[2] = 0.0f;
                 }
-                immBaseColor = RGBSpectrum(color[0], color[1], color[2]);
+                immBaseColor = min(RGBSpectrum(color[0], color[1], color[2]), RGBSpectrum(0.9f));
             }
             surfMat = createLambertianMaterial(
                 diffuseColorPath, immBaseColor);
