@@ -1,0 +1,75 @@
+image 1920 1080
+time 0 10 24
+
+camera cam
+
+fovy cam 70
+lookat cam 0 0 2.3   0 0 0   0 1 0
+cam-addkey cam 0.0 false false
+
+
+
+rect 0.5 0.5 rectlight
+emittance rectlight 100 100 100 diffuse
+inst rectlight rectlight_inst
+trans rectlight_inst 0 0.999 0
+inst-addkey rectlight_inst 0.0 false false
+
+
+
+rect 0.125 0.125 dir
+emittance dir 2560 2560 2560 directional
+inst dir dir_inst
+trans dir_inst 1.666 0 0
+rotate dir_inst 0 0 1  -90
+inst-addkey dir_inst 0.0 false false
+
+
+
+mesh "dark_room_wide.obj" 1 room
+inst room room_inst
+inst-addkey room_inst 0.0 false false
+
+
+
+material specularscattering 1 1 1.517 64.2 glass
+
+
+
+mesh "sphere.obj" 0.15 glass sphere
+inst sphere sphere_inst
+trans sphere_inst 1 0 0
+inst-addkey sphere_inst 0.0 false false
+
+
+
+mesh "low_cylinder.obj" 0.4 glass cylinder
+inst cylinder cylinder_inst
+trans cylinder_inst 0 0 0
+//rotate cylinder_inst 1 0 1.5 85
+//inst-addkey cylinder_inst 0.0 false false
+//rotate cylinder_inst 1 0 1.5 -85
+//inst-addkey cylinder_inst 10.0 false false
+rotate cylinder_inst 0 0 1 90
+inst-addkey cylinder_inst 0.0 false false
+inst-addkey cylinder_inst 1.0 false false
+rotate cylinder_inst 1 0 0 90
+inst-addkey cylinder_inst 5.0 false false
+rotate cylinder_inst 0 0 1 180
+inst-addkey cylinder_inst 9.0 false false
+inst-addkey cylinder_inst 10.0 false false
+
+
+
+mesh "teapot.obj" 0.006 glass teapot
+inst teapot teapot_inst
+trans teapot_inst -1 -0.2 0
+rotate teapot_inst 0 1 0 90
+inst-addkey teapot_inst 0.0 false false
+
+
+
+//mesh "fixed_mitsuba_ball.obj" 0.3 glass ball
+//inst ball ball_inst
+//trans ball_inst 0 -0.9 0
+//inst-addkey ball_inst 0.0 false false
